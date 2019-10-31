@@ -1,0 +1,190 @@
+# ========================================
+# Rules for STEP5
+# Generate fold change and log10pval signal
+# tracks using MACS2.1
+# ========================================
+wildcard_constraints:
+    track = 'fc|pval',
+    TAsuf = '|.sub',
+    CTsuf = '|.sub'
+
+rule macs_get_sval:
+    input:
+        TA = "{filedir}/files/"+EPITOPE+"/qc/{TAprefix}.numreads",
+        control = "{filedir}/files/WCE/qc/{CTprefix}.numreads"
+    output:
+        sval = temp("{filedir}/files/"+EPITOPE+"/bedgraph/{TAprefix}_VS_{CTprefix}.sval")
+    message: "-- Evaluate read depth difference for signal tracks --"
+    run:
+        with open(input.TA,'r') as ta:
+            chipReads = float(ta.readline().strip()) / 1000000.0
+        with open(input.control,'r') as cl:
+            controlReads = float(cl.readline().strip()) / 1000000.0
+        sval = min(controlReads,chipReads)
+        print(sval)
+        with open(output.sval,'w') as out:
+            out.write(str(sval))
+
+rule macs_pileup_lambda_bdg:
+    input:
+        TA = TMPDIR+"/TA_{TAprefix}.tagAlign",
+        control = TMPDIR+"/WCE_{CTprefix}.tagAlign",
+        fraglen = EPDIR+"/qc/{TAprefix}.cc.qc"
+    output: temp(EPDIR+"/bedgraph/{TAprefix}_VS_{CTprefix}_treat_pileup.bdg"),
+        temp(EPDIR+"/bedgraph/{TAprefix}_VS_{CTprefix}_control_lambda.bdg")
+    params: genomesize = config.GENOMESIZE, p_thresh = '1e-2', env = config.MACS_ENV,
+        sgpref = EPDIR+"/bedgraph/{TAprefix}_VS_{CTprefix}"
+    message: "== Create the pileup and control lambda bedgraph tracks using MACS2.1 =="
+    run:
+        shell("{params.env}; macs2 callpeak -t {input.TA} -c {input.control} -f BED -n {params.sgpref} -g {params.genomesize} -p {params.p_thresh} --nomodel --extsize "  + str(config.get_fraglen(input.fraglen)) + " -B --SPMR")
+        shell("rm -f {params.sgpref}_peaks.xls {params.sgpref}_summits.bed {params.sgpref}_peaks.narrowPeak")
+
+rule macs_foldchange_bdg:
+    input:
+        pileup = "{filedir}/bedgraph/{comppref}_treat_pileup.bdg",
+        control = "{filedir}/bedgraph/{comppref}_control_lambda.bdg"
+    output: temp("{filedir}/bedgraph/{comppref}.fc.signal.bedgraph")
+    params: chrom = config.CHROMSIZES, p_thresh = '1e-2', env = config.MACS_ENV,
+        sgpref = "{filedir}/bedgraph/{comppref}"
+    message: "== Generating FoldChange bedgraph =="
+    shell: """
+    {params.env}
+    macs2 bdgcmp -t {input.pileup} -c {input.control} -o {params.sgpref}_FE.bdg -m FE
+    slopBed -i {params.sgpref}_FE.bdg -g {params.chrom} -b 0 | bedClip stdin {params.chrom} {output}
+    rm -f {params.sgpref}_FE.bdg {params.sgpref}_peaks.xls {params.sgpref}_summits.bed {params.sgpref}_peaks.narrowPeak
+    """
+
+rule macs_log10pval_bdg:
+    input:
+        pileup = "{filedir}/bedgraph/{comppref}_treat_pileup.bdg",
+        control = "{filedir}/bedgraph/{comppref}_control_lambda.bdg",
+        sval = "{filedir}/bedgraph/{comppref}.sval"
+    output: temp("{filedir}/bedgraph/{comppref}.pval.signal.bedgraph")
+    params: chrom = config.CHROMSIZES, p_thresh = '1e-2', env = config.MACS_ENV,
+        sgpref = "{filedir}/bedgraph/{comppref}"
+    message: "== Generating -log10pval bedgraph =="
+    run:
+        shell("{params.env}; macs2 bdgcmp -t {input.pileup} -c {input.control} -o {params.sgpref}_ppois.bdg -m ppois -S " + config.get_sval(input.sval))
+        shell("""
+        slopBed -i {params.sgpref}_ppois.bdg -g {params.chrom} -b 0 | bedClip stdin {params.chrom} {output}
+        rm -f {params.sgpref}_ppois.bdg
+        """)
+        shell("rm -f {params.sgpref}_peaks.xls {params.sgpref}_summits.bed {params.sgpref}_peaks.narrowPeak")
+
+rule bedgraph_compress:
+    input: "{filedir}/bedgraph/{prefix}.bedgraph"
+    output: temp("{filedir}/bedgraph/{prefix}.bedgraph.gz")
+    params: bin = config.BINDIR, tmpdir = TMPDIR
+    message: "== Sort and compress {wildcards.prefix} bedgraph =="
+    shell: "{params.bin}/bedgraph_compress.sh {input} {output} {wildcards.prefix} {params.tmpdir}"
+
+rule bedgraph_to_bigWig:
+    input: "{filedir}/bedgraph/{prefix}.bedgraph.gz" # NOTE: must be sorted
+    output: temp("{filedir}/bedgraph/{prefix}.bigwig")
+    params: chrom = config.CHROMSIZES
+    message: "-- Create bigWig file {output} from bedgraph --"
+    shell: """
+    gunzip -c {input} > {input}.tmp
+    bedGraphToBigWig {input}.tmp {params.chrom} {output}
+    rm {input}.tmp
+    """
+
+# =================================
+# STEP5b - Convert for ChromImpute:
+# =================================
+rule chromImpute_bedgraph_info:
+    output: temp("{filedir}/bedgraph/{comppref}_{track}_tab.txt")
+    params: cell = cell, epitope = EPITOPE
+    message: "-- Making info table for {wildcards.track} bedgraph {wildcards.comppref} conversion for ChromImpute --"
+    shell: "echo '{params.cell}\t{params.epitope}\t{wildcards.comppref}.{wildcards.track}.signal.bedgraph.gz' > {output}"
+
+rule chromImpute_bedgraph_average:
+    input:
+        bdg = EPDIR + "/bedgraph/{comppref}.{track}.signal.bedgraph.gz",
+        info = EPDIR + "/bedgraph/{comppref}_{track}_tab.txt",
+        chromimpute = config.CHROMIMPUTE
+    output: expand("{{outdir}}/{chr}_{{comppref}}.{{track}}.signal.bedgraph.gz.wig.gz", chr = config.CHRS_noY)
+    params: bdgdir = EPDIR + "/bedgraph",
+        chrom = config.CHROMSIZES
+    message: "== Convert {wildcards.track} bedgraph {wildcards.comppref} into 25bp average tracks =="
+    shell: "java -mx4000M -jar {input.chromimpute} Convert {params.bdgdir} {input.info} {params.chrom} {wildcards.outdir}"
+
+# ================================
+# STEP5c - Binarize (for ChromHMM)
+# ================================
+# rule chromHMM_bed_info:
+#     output: temp("{filedir}/tagAlign/FINAL_"+EPITOPE+"_{cell}.sub_HMMtab.txt")
+#     params:
+#         TA = "FINAL_"+EPITOPE+"_{cell}.sub.tagAlign.gz",
+#         control = CTRL_PREFIX + ".tagAlign.gz",
+#         epitope = EPITOPE
+#     message: "-- Making info table for binarizing bed file {params.epitope} + {wildcards.cell} for ChromHMM --"
+#     shell: "echo '{wildcards.cell}\t{params.epitope}\t{params.TA}\t{params.control}' > {output}"
+
+# rule chromHMM_binarize_bed:
+#     input:
+#         info = EPDIR + "/tagAlign/" + POOL_PREFIX + ".sub_HMMtab.txt",
+#         TA = EPDIR + "/tagAlign/" + POOL_PREFIX + ".sub.tagAlign.gz",
+#         control = CTRL_DIR + "/tagAlign/" + CTRL_PREFIX + ".tagAlign.gz",
+#         # fraglen = MAINDIR+"/files/"+EPITOPE+"/qc/"+POOL_PREFIX+".sub.cc.qc",
+#         chmm = config.CHMM
+#     output: expand("{{outdir}}/"+cell+"_{chr}_binary.txt", chr = config.CHRS_noY)
+#     params:
+#         ctrldir = CTRL_DIR + "/tagAlign",
+#         beddir = EPDIR + "/tagAlign",
+#         chromsizes = config.CHROMSIZES
+#     message: "== Binarize {input.TA} bed file for ChromHMM =="
+#     run:
+#         # NOTE: Fixed at 200/2 Fragment Length:
+#         shell("java -mx4000M -jar {input.chmm} BinarizeBed -c {params.ctrldir} -n 100 {params.chromsizes} {params.beddir} {input.info} {wildcards.outdir}")
+#         # Alternatively:
+#         # shell("java -mx4000M -jar {input.chmm} BinarizeBed -c {params.ctrldir} -n " + str(config.get_fraglen(input.fraglen)) + " {params.chromsizes} {params.beddir} {input.info} {wildcards.outdir}")
+
+# ================================
+# STEP5c - Binarize (for ChromHMM)
+# These two rules inc. subsampled:
+# ================================
+# NOTE: TAsuf and CTsuf are separated for identifiability and allow processing of diff subsamples
+rule chromHMM_bed_info_sn:
+    output: temp("{filedir}/tagAlign/FINAL_"+EPITOPE+"_c{CTsuf}_{cell}_t{TAsuf}_HMMtab.txt")
+    params:
+        TA = "FINAL_"+EPITOPE+"_{cell}{TAsuf}.tagAlign.gz",
+        control = CTRL_PREFIX + "{CTsuf}.tagAlign.gz",
+        epitope = EPITOPE
+    message: "-- Making info table for binarizing bed file {params.epitope} + {wildcards.cell} for ChromHMM --"
+    shell: "echo '{wildcards.cell}_c{wildcards.CTsuf}_t{wildcards.TAsuf}\t{params.epitope}\t{params.TA}\t{params.control}' > {output}"
+
+rule chromHMM_binarize_bed_sn:
+    input:
+        info = EPDIR + "/tagAlign/FINAL_"+EPITOPE+"_c{CTsuf}_{cell}_t{TAsuf}_HMMtab.txt",
+        TA = EPDIR + "/tagAlign/FINAL_"+EPITOPE+"_{cell}{TAsuf}.tagAlign.gz",
+        control = CTRL_DIR + "/tagAlign/" + CTRL_PREFIX + "{CTsuf}.tagAlign.gz",
+        # fraglen = MAINDIR+"/files/"+EPITOPE+"/qc/"+POOL_PREFIX+".sub.cc.qc",
+        chmm = config.CHMM
+    output: temp(expand("{{outdir}}/{{cell}}_c{{CTsuf}}_t{{TAsuf}}_{chr}_binary.txt", chr = config.CHRS_noY))
+    params:
+        ctrldir = CTRL_DIR + "/tagAlign",
+        beddir = EPDIR + "/tagAlign",
+        chromsizes = config.CHROMSIZES
+    message: "== Binarize {input.TA} bed file for ChromHMM =="
+    run:
+        # NOTE: Fixed at 200/2 Fragment Length:
+        shell("java -mx4000M -jar {input.chmm} BinarizeBed -c {params.ctrldir} -n 100 {params.chromsizes} {params.beddir} {input.info} {wildcards.outdir}")
+        # Alternatively:
+        # shell("java -mx4000M -jar {input.chmm} BinarizeBed -c {params.ctrldir} -n " + str(config.get_fraglen(input.fraglen)) + " {params.chromsizes} {params.beddir} {input.info} {wildcards.outdir}")
+
+rule chromHMM_collate_chrs_sn:
+    input: expand("{{outdir}}/{{prefix}}_{chr}_binary.txt", chr = config.CHRS_noY)
+    output: temp("{outdir}/{prefix}_full_binary.txt")
+    params: chrs = config.CHRS_noY
+    message: "-- Concatenate all chromosomes for {wildcards.prefix} --"
+    run:
+        shell('echo "{wildcards.prefix}" > {output}')
+        for chr in params.chrs:
+            shell("awk 'NR > 2' {wildcards.outdir}/{wildcards.prefix}_" + chr + "_binary.txt >> {output}")
+
+rule chromHMM_gzip_binary_sn:
+    input: "{outdir}/{prefix}_binary.txt"
+    output: "{outdir}/{prefix}_binary.txt.gz"
+    message: "-- gzip {wildcards.prefix} binary.txt file --"
+    shell: "gzip -c {input} > {output}"

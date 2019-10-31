@@ -1,0 +1,222 @@
+# =======================================
+# Rules for STEP1:
+# Download files and turn BAM to tagAlign
+# =======================================
+wildcard_constraints:
+    assembly = ASSEMBLIES, # 'hg19|GRCh38',
+    extension = 'bam|tagAlign',
+    strid = VALID_STRID  # All valid string IDs for task
+
+rule get_download_link:
+    output: expand(EPDIR + "/tagAlign/{strid}_{assembly}.{extension}.link", zip, strid = STRID, assembly = assemblies, extension = extensions)
+    run:
+        shell("touch " + " ".join(output))
+
+# Depending on the extension, take different actions!
+rule tagAlign_download:
+    input: link = "{filedir}/tagAlign/{strid}_{assembly}.tagAlign.link"
+    output: TA = temp("{filedir}/tagAlign/{strid}_{assembly}.filt.nodup.srt.SE.tagAlign.gz")
+    params: secret = config.ENCODE_PASS
+    message: "== Downloading {output.TA} =="
+    run:
+        link =  LINKS[wildcards.strid]
+        if os.path.exists(link):
+            shell("cp " + link + " {output.TA}")
+        else:
+            shell("curl -L -u '{params.secret}' -o {output.TA} " + link)
+
+# NOTE: Figure out MD5? Should get interrupted if incomplete run.
+rule bam_download:
+    input: link = "{filedir}/tagAlign/{strid}_{assembly}.bam.link"
+    output: raw = temp("{filedir}/tagAlign/{strid}_{assembly}.bam")
+    params: secret = config.ENCODE_PASS
+    message: "== Downloading {output.raw} =="
+    run:
+        link =  LINKS[wildcards.strid]
+        if os.path.exists(link):
+            shell("cp " + link + " {output.raw}")
+        else:
+            shell("curl -L -u '{params.secret}' -o {output.raw} " + link)
+
+# ==============
+# General Rules:
+# ==============
+rule bam_index:
+    input: "{filedir}/tagAlign/{prefix}.bam"
+    output: temp("{filedir}/tagAlign/{prefix}.bai")
+    message: "== Indexing bam file {input} =="
+    shell: "samtools index {input} {output}"
+
+rule bam_check_if_paired:
+    input: raw = "{filedir}/tagAlign/{strid}_{assembly}.bam", samtl = config.SAMTL
+    output: temp("{filedir}/tagAlign/{strid}_{assembly}.isPaired.bam")
+    message: "-- Checking whether BAM file comes from paired end sequencing--"
+    shell: "{input.samtl} view -c -f 1 {input.raw} > {output}"
+
+rule QC_bam_get_header:
+    input: raw = "{filedir}/tagAlign/{prefix}.bam", samtl = config.SAMTL
+    output: "{filedir}/tagAlign/{prefix}_header.sam"
+    message: "-- Storing header of raw BAM file {prefix} --"
+    shell: "samtools view -H {input.raw} > {output}"
+
+rule QC_bam_mapq:
+    input:
+        raw = "{filedir}/tagAlign/{prefix}.bam",
+        samtl = config.SAMTL,
+        ind = "{filedir}/tagAlign/{prefix}.bai"
+    output: "{filedir}/qc/{prefix}.mapq.qc"
+    message: "-- Storing distribution of QC values from raw BAM file --"
+    shell: "{input.samtl} view {input.raw} | cut -f5 | sort -n | uniq -c > {output}"
+
+# ==========================
+# Specific Processing Rules:
+# ==========================
+# samtools v1.3.1 or higher required here:
+ # Diff procedures if PE or if SE.
+rule bam_filter:
+    input:
+        raw = "{filedir}/tagAlign/{strid}_{assembly}.bam",
+        samtl = config.SAMTL, ind = "{filedir}/tagAlign/{strid}_{assembly}.bai",
+        IP = "{filedir}/tagAlign/{strid}_{assembly}.isPaired.bam"
+    output: temp("{filedir}/tagAlign/{strid}_{assembly}.filt.srt.bam")
+    params: tmppref = config.TMP + "/{strid}_{assembly}.tmp"
+    message: "== Filtering to get {output} =="
+    run:
+        isPaired = config.read_isPaired(input.IP)  # read file
+        if isPaired:
+            print("Processing Paired-End")
+            shell("{input.samtl} view -F 1804 -f 2 -q " + str(MAPQ_THRESH[wildcards.strid]) + " -b {input.raw} | {input.samtl} sort - -n -T {params.tmppref} -o {output}.tmp")
+            # Remove orphan reads (pair was removed) and read pairs mapping to different chromosomes
+            shell("{input.samtl} fixmate -r {output}.tmp {output}.fixmate.tmp")
+            # POSITION SORTED for marking duplicates!
+            shell("""
+            {input.samtl} view -F 1804 -f 2 -u {output}.fixmate.tmp | {input.samtl} sort - -T {params.tmppref} -o {output}
+            rm {output}.tmp {output}.fixmate.tmp
+            {input.samtl} view -H {output} | grep SO""")
+        else:
+            print("Processing Single-End and fixing zero-length reads")
+            shell("{input.samtl} view -F 1804 -q " + str(MAPQ_THRESH[wildcards.strid]) + " -b {input.raw} | {input.samtl} view -h | awk 'BEGIN{{OFS=\"\t\"}}{{if($10 == \"*\" && $9 == \"0\"){{$9=$6; sub(\"M\",\"\",$9)}}; print $0}}' | {input.samtl} sort - -T {params.tmppref} -o {output}; {input.samtl} view -H {output} | grep SO")
+            # shell("{input.samtl} view -F 1804 -q " + str(MAPQ_THRESH[wildcards.strid]) + " -b {input.raw} | {input.samtl} sort - -T {params.tmppref} -o {output}; {input.samtl} view -H {output} | grep SO")
+
+# Same for both single and paired end (make sure file is position sorted)
+rule bam_markdups:
+    input: filt = "{filedir}/tagAlign/{prefix}.filt.srt.bam", markdup = config.MARKDUP
+    output: dupqc = "{filedir}/qc/{prefix}.filt.srt.dup.qc"
+    params: tmpfile = "{filedir}/tagAlign/{prefix}.filt.srt.dupmark.bam"
+    message: "== Marking duplicates for {input.filt} =="
+    shell: """
+    java -Xmx4G -jar {input.markdup} INPUT={input.filt} OUTPUT={params.tmpfile} METRICS_FILE={output.dupqc} VALIDATION_STRINGENCY=SILENT ASSUME_SORTED=true REMOVE_DUPLICATES=false
+    mv {params.tmpfile} {input.filt}
+    """
+    # NOTE: Validation stringency should be higher: LENIENT or STRICT
+
+# NOTE: DUPQC is a requirement to chain jobs in correct order in the following:
+rule bam_remove_dups:
+    input:
+        filt = "{filedir}/tagAlign/{prefix}.filt.srt.bam",
+        samtl = config.SAMTL, dupqc = "{filedir}/qc/{prefix}.filt.srt.dup.qc",
+        IP = "{filedir}/tagAlign/{prefix}.isPaired.bam"
+    params: tmppref = config.TMP + "/{prefix}.tmp"
+    output: temp("{filedir}/tagAlign/{prefix}.filt.nodup.srt.bam")
+    message: "== Removing duplicates to get {output} =="
+    run:
+        filt_flags = '-F 1804 '
+        isPaired = config.read_isPaired(input.IP)  # read file
+        if isPaired:
+            print("Removing Paired-End Duplicates and re-sorting")
+            # Obtain NAME sorted BAM (don't use position sorted for paired end):
+            shell("""
+            {input.samtl} view -F 1804 -f 2 -b {input.filt} > {output}.tmp
+            {input.samtl} sort {output}.tmp -n -T {params.tmppref} -o {output}
+            rm {output}.tmp""")
+        else:
+            print("Removing Single-End Duplicates")
+            shell("{input.samtl} view -F 1804 -b {input.filt} > {output}")
+
+# Different rules for paired vs. unpaired:
+rule QC_bam_complexity:
+    input:
+        filt = "{filedir}/tagAlign/{prefix}.filt.srt.bam",
+        dupqc = "{filedir}/qc/{prefix}.filt.srt.dup.qc", # dupqc orders rules
+        IP = "{filedir}/tagAlign/{prefix}.isPaired.bam"
+    output: pbc = "{filedir}/qc/{prefix}.filt.nodup.srt.pbc.qc"
+    message: "-- Computing library complexity --"
+    run:
+        isPaired = config.read_isPaired(input.IP)  # read file
+        if isPaired:
+            shell("""bedtools bamtobed -bedpe -i {input.filt} | awk 'BEGIN{{OFS="\t"}}{{print $1,$2,$4,$6,$9,$10}}' | grep -v 'chrM' | sort | uniq -c | \
+            awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1){{m1=m1+1}} ($1==2){{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{printf "%d\\t%d\\t%d\\t%d\\t%f\\t%f\\t%f\\n",mt,m0,m1,m2,m0/mt,m1/m0,m1/m2}}' > {output.pbc}""")
+        else:
+            shell("""bedtools bamtobed -i {input.filt} | awk 'BEGIN{{OFS="\t"}}{{print "chr"$1,$2,$3,$6}}' | grep -v 'chrM' | sort | uniq -c | \
+            awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1){{m1=m1+1}} ($1==2){{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{printf("%d\\t%d\\t%d\\t%d\\n",mt,m0,m1,m2)}}' > {output.pbc}""")
+
+rule QC_bam_flagstat:
+    input:
+        bam = "{filedir}/tagAlign/{prefix}.filt.nodup.srt.bam",
+        samtl = config.SAMTL,
+        ind = "{filedir}/tagAlign/{prefix}.filt.nodup.srt.bai"
+    output: flag = "{filedir}/qc/{prefix}.filt.nodup.srt.flagstat.qc"
+    message: "-- Computing bam file flagstats --"
+    shell: "{input.samtl} flagstat {input.bam} > {output.flag}"
+
+rule bam_to_tagAlign:
+    input:
+        bam = "{filedir}/tagAlign/{strid}_{assembly}.filt.nodup.srt.bam",
+        # Problematic to have index if potentially paired-end:
+        # ind = "{filedir}/tagAlign/{strid}_{assembly}.filt.nodup.srt.bai",
+        IP = "{filedir}/tagAlign/{strid}_{assembly}.isPaired.bam"
+    output: temp("{filedir}/tagAlign/{strid}_{assembly}.filt.nodup.srt.SE.tagAlign.gz")
+    params: rlen = RLEN
+    message: "== Making tagAlign file from bam =="
+    run:
+        isPaired = config.read_isPaired(input.IP)  # read file
+        if isPaired:
+            shell("""bedtools bamtobed -bedpe -mate1 -i {input.bam} | grep -v 'chrM' | \
+            awk 'BEGIN{{OFS="\t"}}NR==1{{a =$1; sub("[0-9XY]+","",a); chrpref=(a=="chr"?"":"chr")}}{{$1=chrpref$1; print $1,$2,$3,"N","1000",$9}}' | \
+            awk -v rlen={params.rlen} 'BEGIN{{FS="\t";OFS="\t"}} $6=="+"{{$3=$2+rlen; print $0}} $6=="-"{{a=$3-rlen; $2=(a>1?a:1); print $0}}' | gzip -c > {output}""")
+        else:
+            shell("""bedtools bamtobed -i {input.bam} | awk 'BEGIN{{OFS="\t"}}NR==1{{a =$1; sub("[0-9]+","",a); chrpref=(a=="chr"?"":"chr")}}{{$1=chrpref$1; $4="N";$5="1000";print $0}}' | \
+            awk -v rlen={params.rlen} 'BEGIN{{FS="\t";OFS="\t"}} $6=="+"{{$3=$2+rlen; print $0}} $6=="-"{{a=$3-rlen; $2=(a>1?a:1); print $0}}' | gzip -c > {output}""")
+
+rule tagAlign_liftover:
+    input: TA = "{filedir}/tagAlign/{strid}_GRCh38.filt.nodup.srt.SE.tagAlign.gz",
+        lochain = config.LOCHAIN
+    output: TA = "{filedir}/tagAlign/{strid}_hg19.filt.nodup.srt.SE.tagAlign.gz",
+        unmap = "{filedir}/tagAlign/{strid}_GRCh38.over.unmapped"
+    params: tmp = "{filedir}/tagAlign/{strid}_GRCh38.over.tagAlign"
+    message: "== lifting over hg38 to hg19 tagAlign =="
+    shell: """
+    liftOver {input.TA} {input.lochain} {params.tmp} {output.unmap}
+    gzip -c {params.tmp} > {output.TA}
+    rm {params.tmp}"""
+
+# rule tagAlign_liftover_reverse:
+#     input: TA = "{filedir}/tagAlign/{strid}_hg19.filt.nodup.srt.SE.tagAlign.gz",
+#         lochain = config.LOCHAIN_REVERSE
+#     output: TA = "{filedir}/tagAlign/{strid}_GRCh38.filt.nodup.srt.SE.tagAlign.gz",
+#         unmap = "{filedir}/tagAlign/{strid}_hg19.over.unmapped"
+#     params: tmp = "{filedir}/tagAlign/{strid}_hg19.over.tagAlign"
+#     message: "== lifting over hg19 to hg38 tagAlign =="
+#     shell: """
+#     liftOver {input.TA} {input.lochain} {params.tmp} {output.unmap}
+#     gzip -c {params.tmp} > {output.TA}
+#     rm {params.tmp}"""
+
+# NOTE: Temporary unless required by rules. We prefer to keep only the pooled version.
+rule tagAlign_remove_unmappable:
+    input: map = MAPPABLE, blacklist = config.BLACKLIST,
+        TA = "{filedir}/tagAlign/{strid}_hg19.filt.nodup.srt.SE.tagAlign.gz"
+    output: temp("{filedir}/tagAlign/FINAL_{strid}.tagAlign.gz")
+    message: "== Removing hg19 unmappable regions with {input.map} and any reads overlapping blacklisted regions in {input.blacklist} =="
+    shell: """
+    zcat {input.TA} | bedtools intersect -a - -b {input.map} | bedtools subtract -a - -b {input.blacklist} -A | gzip -c > {output}
+    # Sanity check to see if we were successful:
+    zcat {output} | tail
+    """
+
+rule QC_tagAlign_count_reads:
+    input: "{filedir}/tagAlign/{prefix}.tagAlign.gz"
+    output: "{filedir}/qc/{prefix}.numreads"
+    message: "-- Counting final number of reads --"
+    shell: "zcat {input} | wc -l > {output}"
+

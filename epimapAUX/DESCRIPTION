@@ -1,0 +1,13 @@
+Package: epimapAUX
+Title: Auxiliary Functions for the EpiMap Project
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Carles",
+           family = "Boix",
+           role = c("aut", "cre"),
+           email = "cboix@mit.edu")
+Description: Container for the main auxiliary functions in the EpiMap project paper
+License: CC-BY 4.0
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.1.1

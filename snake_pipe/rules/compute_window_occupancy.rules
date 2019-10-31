@@ -1,0 +1,44 @@
+# ===========================================
+# Rules for STEP2 
+# Compute windows occupancy for the dataset:
+# ===========================================
+# NOTE: Must have all possible windows:
+wildcard_constraints:
+    window = 'CONTROL2_5k|2_5k|5k|50k|100k|150k|200k'
+
+# Sorted temporary file:
+rule tagAlign_tmpsort:
+    input: "{filedir}/tagAlign/FINAL_{strid}.tagAlign.gz"
+    output: temp("{filedir}/tagAlign/FINAL_{strid}.tagAlign.tmp.gz")
+    message: "== Making temporary sorted {output} =="
+    shell: "zcat {input} | sort -k1,1 -k2,2n | gzip -c > {output}"
+
+rule compute_window_occupancy:
+    input: tmp = "{filedir}/tagAlign/FINAL_{strid}.tagAlign.tmp.gz", bed = config.GTFDIR + "/Genes.{window}_sorted.bed"
+    output: table = temp("{filedir}/window_coverage/{strid}.occ.{window}.tsv")
+    message: "== Calculating window occupancy for {output.table} =="
+    shell: "zcat {input.tmp} | bedtools intersect -a {input.bed} -b - -c -sorted > {output.table}"
+
+rule merge_windows:
+    input: expand("{{filedir}}/window_coverage/{{strid}}.occ.{window}.tsv", window = config.WINDOWS)
+    output: "{filedir}/window_coverage/{strid}.DHS_windows"
+    params: cols = config.GENE_COLS
+    message: "== Merging separate window tables to get {output} =="
+    run:
+        for tab in input:
+            win = tab.split('.')[-2]
+            print(tab)
+            shell("touch {output}")
+            shell("awk -vFS='\\t' -v vari='" + win + "' 'BEGIN{{print vari}}{{print $6}}' " + tab + " | pr -mts {output} - > {output}_2")
+            shell("mv {output}_2 {output}")
+        shell("""
+        awk -vOFS='\\t' '{{print $1,$2,$3,$4,$5,$6,$7}}' {output} | sed "1d" | pr -mts {params.cols} - |  sed "1iCHR\\tNAME\\tCONTROL2_5k\\t2_5k\\t5k\\t50k\\t100k\\t150k\\t200k" > {output}_2
+        mv {output}_2 {output}
+        """)
+
+rule tagAlign_chromArm:
+    input: tmp = "{filedir}/tagAlign/FINAL_{strid}.tagAlign.tmp.gz", arm = config.CHROMARM
+    output: "{filedir}/window_coverage/{strid}.chrom_arm"
+    message: "== Creating chrom_arm file {output} =="
+    shell: "zcat {input.tmp} | bedtools intersect -a {input.arm} -b - -c -sorted > {output}"
+

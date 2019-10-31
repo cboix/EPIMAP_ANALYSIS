@@ -1,0 +1,341 @@
+# ======================================
+# Snakefile: DNase + ChIP-seq pipeline
+#
+# Run in qsub array format -
+# process one cell type per run from
+# in the info table of experiments to process.
+#
+# If we want mail too:
+# See https://www.cyberciti.biz/tips/linux-use-gmail-as-a-smarthost.html
+# snakemake 2> snakemake.log
+# mail -s "snakemake Finished" cboix@mit.edu < snakemake.log
+# ======================================
+import os
+import config
+import signal
+import random
+import csv
+
+# Arguments:
+EPITOPE = os.environ.get("EPITOPE")
+TASK = int(os.environ.get("SGE_TASK_ID")) - 1 # Run only one task!
+
+# Genus and Species specific variables:
+BUILD = os.environ.get("BUILD")
+NAM = 'all_submitted_released'
+if BUILD == 'mm10':
+    ASSEMBLIES = 'mm10|mm9'
+    AMBL_OLD = 'mm9'
+    GSID = 'Mus_musculus'
+    PREFIX = 'mm'
+    NAM = PREFIX + "_" + NAM
+else:
+    ASSEMBLIES= 'GRCh38|hg19'
+    BUILD = 'hg19'
+    BUILD_hg38 = 'GRCh38'
+    GSID = 'Homo sapiens'
+    PREFIX = ''
+
+
+# Variables:
+RLEN = 36 # NOTE: currently standardized, but could change
+MAPPABLE = config.MAP36 # paired with RLEN
+if EPITOPE == "DNase-seq" or EPITOPE == "ATAC-seq":
+    EXPT = EPITOPE
+    NREADS = 50000000
+else:
+    EXPT = "ChIP-seq"
+    NREADS = 30000000
+
+MAINDIR = config.DBDIR + "/" + EXPT
+INFOTAB = MAINDIR+"/file_links/"+NAM+"/"+EPITOPE+"_bam.csv"
+
+CTRL_DIR = MAINDIR + "/files/WCE"
+EPDIR = MAINDIR + "/files/" + EPITOPE
+subdirs = [ "window_coverage", "peaks", "tagAlign", "bedgraph", "qc" ]
+EPITOPE_DIRS = [ EPDIR + "/" + d for d in subdirs ]
+DIRS = config.DIRS + EPITOPE_DIRS
+
+# Information on files:
+info = []
+cell_dict = {}
+with open(INFOTAB) as infile:
+    reader = csv.DictReader(infile, delimiter="\t")
+    for row in reader:
+        a = row['file'].split('/')[-1]
+        row['id'] = a.split('.')[0]
+        info.append(row)
+        ct = row['cell_type']
+        if ct in cell_dict.keys():
+            cell_dict[ct].append(row)
+        else:
+            cell_dict[ct] = [row]
+
+cells = [k for k in cell_dict.keys()]
+cells.sort()
+
+# Directories for converted data for ChromHMM/ChromImpute
+if BUILD == 'mm10':
+    CONVDIR = config.DBDIR + "/ChromImpute/mm_converted"
+    BINBEDDIR = config.DBDIR + "/ChromHMM/mm_binarized/" + EPITOPE
+else:
+    CONVDIR = config.DBDIR + "/ChromImpute/converted"
+    BINBEDDIR = config.DBDIR + "/ChromHMM/binarized/" + EPITOPE
+config.check_mkdir(CONVDIR)
+config.check_mkdir(BINBEDDIR)
+
+# Task information for all relevant files:
+cell = cells[TASK]
+lines = cell_dict[cell]
+links = [ l['file'] for l in lines ]
+proc_states = [ l['output_type'] for l in lines ]
+ids = [ l['id'] for l in lines ]
+assemblies = [ l['assembly'] for l in lines ]
+extensions = [ config.get_extension(link) for link in links ]
+mapqs = [ config.get_mapq_thresh(status) for status in proc_states ] # MAPQ_THRESH
+
+PROJECT = "EPIMAP_PROCESSING"
+RUN_ID = PROJECT + "_" + str(EPITOPE) + "_" + str(TASK) + "_" + cell
+TMPDIR = config.TMP + "/" + RUN_ID
+config.check_mkdir(TMPDIR)
+print(TMPDIR)
+
+# Information on files:
+wce_map= {}
+ct_info = {}
+with open(config.WCE_MAPPING) as infile:
+    reader = csv.reader(infile, delimiter="\t")
+    for row in reader:
+        ct_info[row[0]] = row[1]
+        wce_map[row[0]] = row[2]
+
+# Set WCE cell:
+if EPITOPE != 'DNase-seq' and EPITOPE !="WCE" and EPITOPE != "ATAC-seq":
+    WCEcell = wce_map[cell]
+    print("Cell is:  " + cell + " - " + ct_info[cell])
+    print("Control: " + WCEcell + " - " + ct_info[WCEcell])
+    print("Working on cell id " + cell + " (" + ct_info[cell] + "), which has " + str(len(links)) + " original files.")
+else:
+    WCEcell = cell
+    print("Working on cell id " + cell + " which has " + str(len(links)) + " original files.")
+
+# ===================
+# Files and prefixes:
+# ===================
+STRID = [id + "_" + cell for id in ids ]
+VALID_STRID = '|'.join(STRID)
+CPREF = ["{}_{}".format(s,a) for s,a in zip(STRID, assemblies) ]
+PREFIX = [ EPDIR + "/tagAlign/" + c for c in CPREF ]
+QC_PREFIX = [ EPDIR + "/qc/" + c for c in CPREF ]
+LINK_FILES = [ EPDIR + "/tagAlign/{}.{}.link".format(p,e) for p,e in zip(PREFIX,extensions) ]
+MAPQ_THRESH = dict(zip(STRID,mapqs))
+LINKS = dict(zip(STRID,links))
+EXT = dict(zip(STRID,extensions))
+
+# Raw Files
+RAW_BAM_FILE = [ p + ".bam" for p in PREFIX ]
+RAW_INDEX_FILE = [ p + ".bai" for p in PREFIX ]
+SORTED_BAM = [ p + ".sorted.bam" for p in PREFIX ]
+QUAL_QC = [ q + ".mapq.qc" for q in QC_PREFIX ] # MAPQ range in raw file
+HEADER_QC = [ p + "_header.sam" for p in PREFIX ] # Header
+
+# Filtering files:
+FILT_BAM_PREFIX = [ p + ".filt.srt" for p in PREFIX ]
+FILT_BAM_FILE = [ f + ".bam" for f in FILT_BAM_PREFIX ]
+DUP_FILE_QC = [ q + ".filt.srt.dup.qc" for q in QC_PREFIX ] # QC file marking dups
+UNMAPPED_QC = [ p + ".over.unmapped" for p,a in zip(PREFIX,assemblies) if a == 'GRCh38' ]
+
+# Final BAM files:
+FINAL_QC_PREFIX = [ q + ".filt.nodup.srt" for q in QC_PREFIX ]
+FINAL_BAM_PREFIX = [ p + ".filt.nodup.str" for p in PREFIX ]
+FINAL_BAM_FILE = [ ff + ".bam" for ff in FINAL_BAM_PREFIX ]
+FINAL_BAM_INDEX_FILE = [ ff + ".bai" for ff in FINAL_BAM_PREFIX ]
+FINAL_BAM_FILE_MAPSTATS = [ qq + ".flagstat.qc" for qq in FINAL_QC_PREFIX ]
+PBC_FILE_QC = [ qq + ".pbc.qc" for qq in FINAL_QC_PREFIX ] # quality statistics
+
+# Final TA files:
+FINAL_TA_FILE = [ EPDIR + "/tagAlign/" + s + "_hg19.filt.nodup.str.SE.tagAlign.gz" for s in STRID ]
+FINAL_STEP1_FILE= [ EPDIR + "/tagAlign/FINAL_" + s + '.tagAlign.gz' for s in STRID ]
+READS_QC = [ EPDIR + "/qc/FINAL_" + s + '.numreads' for s in STRID ]
+
+# ===============================================================
+# Define required outputs for each step:
+# Must require these to properly to run all steps of the pipeline
+# ===============================================================
+# STEP1 Outputs and Cleaning steps:
+STEP1_BAM_OUTPUTS = QUAL_QC + DUP_FILE_QC + PBC_FILE_QC + FINAL_BAM_FILE_MAPSTATS + HEADER_QC
+STEP1_BASE_OUTPUTS = READS_QC +  UNMAPPED_QC
+STEP1_BAM_CLEAN = RAW_BAM_FILE + RAW_INDEX_FILE + SORTED_BAM + FILT_BAM_FILE + FINAL_BAM_FILE + FINAL_BAM_INDEX_FILE
+STEP1_BASE_CLEAN = FINAL_TA_FILE
+# FIXME - choose outputs carefully!
+# if EXT == 'bam':
+#     STEP1_OUTPUTS = STEP1_BASE_OUTPUTS + STEP1_BAM_OUTPUTS
+#     STEP1_CLEAN = STEP1_BASE_CLEAN + STEP1_BAM_CLEAN
+# elif EXT == 'tagAlign':
+STEP1_OUTPUTS = STEP1_BASE_OUTPUTS
+STEP1_CLEAN = STEP1_BASE_CLEAN
+
+# ----------------------------
+# STEP2 Variables and Outputs:
+WINDOWS= ["CONTROL2_5k", "2_5k", "5k", "50k", "100k", "150k", "200k"]
+TMP_TA_FILE = [ EPDIR + "/tagAlign/FINAL_" + s + "tagAlign.tmp.gz" for s in STRID ]
+CHROM_ARM_FILE = [ EPDIR + "/window_coverage/" + s + ".chrom_arm" for s in STRID ]
+DHS_WINDOWS_FILE = [ EPDIR + "/window_coverage/" + s + ".DHS_windows" for s in STRID ]
+TABFILES = expand(EPDIR + "/window_coverage/{strid}.occ.{window}.tsv",
+                strid = STRID, window = WINDOWS)
+STEP2_OUTPUTS = DHS_WINDOWS_FILE + CHROM_ARM_FILE
+STEP2_CLEAN = TABFILES + TMP_TA_FILE + FINAL_STEP1_FILE
+
+# --------------
+# STEP3 Outputs:
+POOL_PREFIX = "FINAL_" + EPITOPE + "_" + cell
+POOL_QC_PREFIX = EPDIR + "/qc/" + POOL_PREFIX
+POOL_TA_PREFIX = EPDIR + "/tagAlign/" + POOL_PREFIX
+FINAL_TA_FILE = POOL_TA_PREFIX + ".tagAlign.gz"
+FINAL_SUB_FILE = POOL_TA_PREFIX + ".sub.tagAlign.gz"
+
+# QC files
+READS_POOLED_QC = POOL_QC_PREFIX + ".numreads"
+READS_SUB_QC = POOL_QC_PREFIX + ".sub.numreads"
+FRAGLENFILE = POOL_QC_PREFIX + ".sub.cc.qc"
+STEP3_OUTPUTS = [ FINAL_SUB_FILE, FINAL_TA_FILE, READS_POOLED_QC, READS_SUB_QC, FRAGLENFILE ]
+
+# ------------------------
+# STEP4 Outputs + Cleaning
+if EPITOPE == 'DNase-seq' or EPITOPE == 'ATAC-seq':
+    CTRL_PREFIX = "Uniform_BKG_CONTROL_" + str(RLEN) + "_" + str(NREADS)
+else:
+    CTRL_PREFIX = "FINAL_WCE_" + WCEcell
+CONTROL_FILE = CTRL_DIR + "/tagAlign/" + CTRL_PREFIX + ".tagAlign.gz"
+COMP_PREFIX = POOL_PREFIX + ".sub_VS_" + CTRL_PREFIX # comparison
+PEAK_PREFIX = EPDIR + "/peaks/" + COMP_PREFIX
+
+# Peaks:
+NARROW_PK = PEAK_PREFIX + ".narrowPeak.gz"
+BROAD_PK = PEAK_PREFIX + ".broadPeak.gz"
+GAPPED_PK = PEAK_PREFIX + ".gappedPeak.gz"
+if EPITOPE == 'DNase-seq' or EPITOPE == 'ATAC-seq':
+    STEP4_OUTPUTS = [ CONTROL_FILE, NARROW_PK, BROAD_PK, GAPPED_PK ]
+else:
+    STEP4_OUTPUTS = [ CONTROL_FILE , NARROW_PK ]
+STEP4_CLEAN = [ COMP_PREFIX + ".sval",  PEAK_PREFIX + "_peaks.*", PEAK_PREFIX + "_summits.*",
+                PEAK_PREFIX + ".broad_peaks.*", PEAK_PREFIX + ".broad_summits.*" ]
+
+# -------------------------
+# STEP5 Outputs + Cleaning:
+SIGNAL_PREFIX = EPDIR + "/bedgraph/" + COMP_PREFIX
+PILEUP_BDG = SIGNAL_PREFIX + "_treat_pileup.bdg"
+LAMBDA_BDG = SIGNAL_PREFIX + "_control_lambda.bdg"
+FC_PREFIX = SIGNAL_PREFIX + ".fc.signal"
+LV_PREFIX = SIGNAL_PREFIX + ".pval.signal"
+FC_BDG = FC_PREFIX + ".bedgraph.gz"
+LV_BDG = LV_PREFIX + ".bedgraph.gz"
+
+# STEP5b and 5c - ChromImpute and ChromHMM inputs:
+CONV_FILES = [ CONVDIR + "/" + c + "_" + COMP_PREFIX + ".pval.signal.bedgraph.gz.wig.gz" for c in config.CHRS_noY ]
+ALLCHR = ['full'] + config.CHRS_noY  # Collated + CHRS
+# Standard CONTROL + SUBSAMPLED TA:
+BINBED_FILES1 = [ BINBEDDIR + "/" + cell + "_c_t.sub_" + c + "_binary.txt.gz" for c in ALLCHR ]
+# Subsample both:
+BINBED_FILES2 = [ BINBEDDIR + "/" + cell + "_c.sub_t.sub_" + c + "_binary.txt.gz" for c in ALLCHR ]
+# Subsample neither:
+BINBED_FILES3 = [ BINBEDDIR + "/" + cell + "_c_t_" + c + "_binary.txt.gz" for c in ALLCHR ]
+
+if EPITOPE == 'DNase-seq' or EPITOPE == 'ATAC-seq':
+    BINBED_FILES = BINBED_FILES1  + BINBED_FILES3  # No subsampled control:
+else:
+    BINBED_FILES = BINBED_FILES1  + BINBED_FILES2  + BINBED_FILES3
+
+STEP5_OUTPUTS = [ CONV_FILES, BINBED_FILES ] # + [LV_BDG, FC_BDG]
+STEP5_CLEAN = [ PILEUP_BDG, LAMBDA_BDG, SIGNAL_PREFIX + "_tab.txt", POOL_TA_PREFIX + "_HMMtab.txt" ]
+
+# ======
+# Rules:
+# ======
+if EPITOPE == "DNase-seq" or EPITOPE == "ATAC-seq":
+    STEP_OUTPUTS = STEP1_OUTPUTS + STEP2_OUTPUTS + STEP3_OUTPUTS + STEP4_OUTPUTS + STEP5_OUTPUTS
+else:
+    STEP_OUTPUTS = STEP1_OUTPUTS + STEP3_OUTPUTS + STEP4_OUTPUTS + STEP5_OUTPUTS
+
+rule all:
+    input: DIRS, STEP_OUTPUTS
+
+rule dirs:
+    output: DIRS
+    shell: "mkdir -p " + " ".join(DIRS)
+
+rule process_pool:
+    input: DIRS, STEP1_OUTPUTS, STEP3_OUTPUTS
+
+rule clean:
+    shell: "rm -f " + ' '.join(STEP1_CLEAN) + ' '.join(STEP2_CLEAN) + ' '.join(STEP4_CLEAN) + ' '.join(STEP5_CLEAN)
+
+# ===================
+# STEP1 - Preprocess:
+# Preprocess and turn into tagAlign files:
+# ===================
+include: 'rules/BAMtoTA_download_preprocess.rules'
+
+rule all_step1:
+    input: STEP1_OUTPUTS
+    message: "==> STEP1 - Download and Preprocess <=="
+    shell: "echo $( du -sh {input} )"
+
+rule test_step:
+    input: FINAL_TA_FILE
+
+rule clean_step1:
+    shell: "rm " + ' '.join(STEP1_CLEAN)
+
+# ===========================================
+# STEP2 - Window Occupancy
+# Compute windows occupancy for the dataset:
+# ===========================================
+include: 'rules/compute_window_occupancy.rules'
+
+rule all_step2:
+    input: STEP2_OUTPUTS
+    message: "==> STEP2 - Get window occupancy <=="
+    shell: "echo $( du -sh {input} )"
+
+rule clean_step2:
+    shell: "rm " + ' '.join(STEP2_CLEAN)
+
+# ==========================================
+# STEP3 - Pool, subsample, and perform SCCA:
+# ==========================================
+include: 'rules/pool_subsample_SCCA.rules'
+
+rule all_step3:
+    input: STEP3_OUTPUTS
+    message: "==> STEP3 - Pool, subsample, and SCCA <=="
+    shell: "echo $( du -sh {input} )"
+
+# ================================
+# STEP4 - Call Peaks using MACS2.1
+# Calls Broad, Narrow, Gapped peaks
+# ================================
+include: 'rules/call_peaks_macs.rules'
+
+rule all_step4:
+    input: STEP4_OUTPUTS
+    message: "==> STEP4 - Call peaks with MACS2.1 <=="
+    shell: "echo $( du -sh {input} )"
+
+rule clean_step4:
+    shell: "rm " + ' '.join(STEP4_CLEAN)
+
+# ===================================
+# STEP5 - Generate Signal Tracks
+# ---5b - Average BDG for Chromimpute
+# ---5c - Binarize for to ChromHMM
+# ===================================
+include: 'rules/generate_signal_tracks_macs.rules'
+
+rule all_step5:
+    input: STEP5_OUTPUTS
+    message: "==> STEP5 - Generate signal tracks with MACS2.1 <=="
+    shell: "echo $( du -sh {input} )"
+
+rule clean_step5:
+    shell: "rm " + ' '.join(STEP5_CLEAN)
