@@ -1,0 +1,24 @@
+\documentclass[11pt]{article}
+\usepackage[tmargin=.5in, bmargin=.5in]{geometry}
+\geometry{letterpaper} 
+\usepackage{amsmath}
+\usepackage{graphicx} 
+\usepackage{verbatim}
+\usepackage{units}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{rotating} % for rotated figures
+\usepackage{ragged2e}  % for '\RaggedRight' macro (allows hyphenation)
+\newcolumntype{Y}{>{\RaggedRight\arraybackslash}X} 
+
+% better monospace font
+\usepackage[T1]{fontenc}
+\usepackage{inconsolata}
+
+\setlist[enumerate]{itemsep=0mm}
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+
+% Do not number sections.
+\setcounter{secnumdepth}{0}

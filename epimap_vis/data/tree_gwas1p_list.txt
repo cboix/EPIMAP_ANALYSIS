@@ -1,0 +1,188 @@
+28448500 - Waist-to-hip ratio adjusted for BMI (joint analysis for main effect and physical activity interaction)
+25673412 - Waist-to-hip ratio adjusted for body mass index
+28443625 - Waist-to-hip ratio adjusted for BMI (adjusted for smoking behaviour)
+29507422 - Triglycerides
+30595370 - Lung function (FEV1/FVC)
+30804560 - Lung function (FEV1/FVC)
+30804560 - Peak expiratory flow
+30804560 - FEV1
+30586737 - Factor VIII levels
+30679814 - QT interval
+22581228 - Fasting blood glucose
+22581228 - Fasting blood glucose (BMI interaction)
+30586737 - vWF levels
+27322543 - Migraine
+30679814 - PR interval
+30046033 - PR interval
+27798624 - Resting heart rate
+29892015 - Atrial fibrillation
+30061737 - Atrial fibrillation
+30578418 - Pulse pressure
+27841878 - Pulse pressure
+29403010 - Hematocrit
+28794112 - P wave duration
+24952745 - QT interval
+20062063 - Electrocardiographic traits
+27659466 - QRS duration
+29769521 - Heart rate response to recovery post exercise
+29212778 - Coronary artery disease
+30595370 - Systolic blood pressure
+27841878 - Systolic blood pressure
+30604766 - Estimated glomerular filtration rate
+29403010 - Total cholesterol levels
+29507422 - High density lipoprotein cholesterol levels
+30275531 - Triglycerides
+29403010 - Triglyceride levels
+29777097 - Family history of Alzheimer's disease
+28107422 - Fibrinogen levels
+29507422 - Total cholesterol levels
+29507422 - Low density lipoprotein cholesterol levels
+30275531 - LDL cholesterol
+25961943 - Cholesterol, total
+28334899 - Total cholesterol levels
+30275531 - Total cholesterol levels
+29403010 - Low density lipoprotein cholesterol levels
+30388399 - C-reactive protein levels
+22001757 - Liver enzyme levels (gamma-glutamyl transferase)
+30595370 - Heel bone mineral density
+30048462 - Heel bone mineral density
+23535729 - Breast cancer
+25751625 - Breast cancer
+30595370 - Balding type 1
+29235454 - Intraocular pressure
+30664634 - Body fat distribution (leg fat ratio)
+26343387 - Myocardial infarction
+29617998 - Intraocular pressure
+29785011 - Asthma or allergic disease (pleiotropy)
+23143596 - Rheumatoid arthritis
+24390342 - Rheumatoid arthritis
+24532676 - Rheumatoid arthritis (ACPA-positive)
+28714469 - Systemic lupus erythematosus
+28199695 - Mosquito bite size
+28067908 - Inflammatory bowel disease
+26974007 - Chronic inflammatory diseases (ankylosing spondylitis, Crohn's disease, psoriasis, primary sclerosing cholangitis, ulcerative colitis) (pleiotropy)
+26192919 - Inflammatory bowel disease
+28067908 - Crohn's disease
+23128233 - Inflammatory bowel disease
+28017375 - Mean corpuscular hemoglobin concentration
+27863252 - Lymphocyte counts
+30595370 - Respiratory diseases
+27863252 - Lymphocyte percentage of white cells
+30595370 - Autoimmune traits
+30595370 - Hypothyroidism
+24076602 - Multiple sclerosis
+30595370 - Eczema
+29083406 - Allergic disease (asthma, hay fever or eczema)
+30595370 - Eosinophil counts
+27863252 - Neutrophil percentage of granulocytes
+27863252 - Eosinophil percentage of white cells
+27863252 - Eosinophil percentage of granulocytes
+27863252 - Sum eosinophil basophil counts
+27863252 - Eosinophil counts
+29273806 - Asthma
+27863252 - Granulocyte count
+27863252 - Sum basophil neutrophil counts
+27863252 - Neutrophil count
+27863252 - Sum neutrophil eosinophil counts
+27863252 - Basophil percentage of white cells
+28453575 - Mean corpuscular volume
+29403010 - Mean corpuscular hemoglobin concentration
+28957414 - Red cell distribution width
+27863252 - Mean corpuscular hemoglobin concentration
+27863252 - Immature fraction of reticulocytes
+27863252 - Red cell distribution width
+29403010 - Mean corpuscular volume
+29403010 - Mean corpuscular hemoglobin
+28017375 - Mean corpuscular volume
+19862010 - Mean corpuscular volume
+27863252 - White blood cell count (basophil)
+28017375 - Mean corpuscular hemoglobin
+30566500 - Polycystic ovary syndrome
+27863252 - Platelet count
+27863252 - High light scatter reticulocyte percentage of red cells
+30595370 - Red cell distribution width
+30595370 - Mean corpuscular hemoglobin
+27863252 - Reticulocyte fraction of red cells
+27863252 - Red blood cell count
+27863252 - Plateletcrit
+27863252 - Mean platelet volume
+27863252 - Platelet distribution width
+28067908 - Ulcerative colitis
+30617256 - Alzheimer's disease or family history of Alzheimer's disease
+29403010 - Albumin-globulin ratio
+23817569 - Self-reported allergy
+29403010 - Red blood cell count
+27863252 - Neutrophil percentage of white cells
+27863252 - Monocyte count
+27863252 - Monocyte percentage of white cells
+27863252 - Granulocyte percentage of myeloid white cells
+27863252 - Mean corpuscular volume
+27863252 - Mean corpuscular hemoglobin
+27863252 - Myeloid white cell count
+28199695 - Itch intensity from mosquito bite
+23222517 - Red blood cell traits
+30595370 - White blood cell count
+27863252 - White blood cell count
+30573655 - Systemic seropositive rheumatic diseases (Systemic sclerosis or systemic lupus erythematosus or rheumatoid arthritis or idiopathic inflammatory myopathies)
+30643258 - General risk tolerance (MTAG)
+30642921 - Factor VII activity
+30038396 - Highest math class taken (MTAG)
+30038396 - Educational attainment (years of education)
+30038396 - Educational attainment (MTAG)
+30038396 - Cognitive performance (MTAG)
+29326435 - Intelligence (MTAG)
+28448500 - Waist-to-hip ratio adjusted for body mass index
+28448500 - Waist-to-hip ratio adjusted for BMI in active individuals
+27863252 - High light scatter reticulocyte count
+29403010 - Non-albumin protein levels
+28928442 - Tonsillectomy
+29912962 - Systolic blood pressure x alcohol consumption (light vs heavy) interaction (2df test)
+30664634 - Body fat distribution (trunk fat ratio)
+30573740 - Male-pattern baldness
+26426971 - Waist-to-hip ratio adjusted for BMI x sex x age interaction (4df test)
+28448500 - Waist circumference adjusted for body mass index
+28448500 - Waist circumference adjusted for BMI (joint analysis main effects and physical activity interaction)
+28448500 - Waist circumference adjusted for BMI in active individuals
+22139419 - Platelet count
+30595370 - Body mass index
+27863252 - Hematocrit
+27863252 - Hemoglobin concentration
+25429064 - Height
+30177863 - Diverticular disease
+29403010 - Systolic blood pressure
+29912962 - Diastolic blood pressure x alcohol consumption (light vs heavy) interaction (2df test)
+30578418 - Systolic blood pressure
+30595370 - Cardiovascular disease
+27841878 - Diastolic blood pressure
+29917119 - Colorectal cancer
+30595370 - Hair color
+30531825 - Blond vs. brown/black hair color
+25673412 - Waist circumference adjusted for body mass index
+28443625 - Waist circumference adjusted for BMI (adjusted for smoking behaviour)
+28443625 - Waist circumference adjusted for BMI (joint analysis main effects and smoking interaction)
+28135244 - Diastolic blood pressure
+29059683 - Breast cancer
+28139693 - Prostate-specific antigen levels
+30664634 - Body fat distribution (arm fat ratio)
+27618448 - Mean arterial pressure
+26561523 - Fibrinogen levels
+27863252 - Reticulocyte count
+30595370 - Red blood cell count
+30275531 - HDL cholesterol
+29777097 - Alzheimer's disease or family history of Alzheimer's disease
+29942086 - Intelligence
+26198764 - Schizophrenia
+26631737 - Urinary albumin-to-creatinine ratio
+27618452 - Diastolic blood pressure
+27618452 - Systolic blood pressure
+26818947 - Type 2 diabetes
+29891935 - Glaucoma (primary open-angle)
+28598434 - Renal cell carcinoma
+30595370 - Lung function (FVC)
+28869591 - Heel bone mineral density
+30598549 - Heel bone mineral density
+30595370 - Waist-hip ratio
+26426971 - Waist-to-hip ratio adjusted for BMI
+29500382 - Feeling tense
+30778226 - Waist-to-hip ratio adjusted for BMI (additive genetic model)
+23166209 - QT interval

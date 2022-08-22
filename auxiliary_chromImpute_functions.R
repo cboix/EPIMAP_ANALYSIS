@@ -353,7 +353,7 @@ UpSet.v2 = function(m, comb_col = "black", set_col = 'black',
                     lwd = 2, pt_size = unit(3, "mm"), 
                     bg_col = "#F0F0F0", bg_pt_col = "#CCCCCC",
                     set_order = order(set_size(m), decreasing = TRUE), 
-                    comb_order = if (attr(m, "set_on_rows")) { 
+                    comb_order = if (attr(m, "param")$set_on_rows) { 
                         order.comb_mat(m[set_order, ], decreasing = TRUE)
                     } else {
                         order.comb_mat(m[, set_order], decreasing = TRUE)
@@ -361,8 +361,8 @@ UpSet.v2 = function(m, comb_col = "black", set_col = 'black',
                     right_annotation = upset_right_annotation(m),
                     row_names_side = "left", ...){
     require(ComplexHeatmap)
-    set_on_rows = attr(m, "set_on_rows")
-    mode = attr(m, "mode")
+    set_on_rows = attr(m, "param")$set_on_rows
+    mode = attr(m, "param")$mode
     m2 = m
     class(m2) = "matrix"
     pt_size = pt_size
@@ -560,3 +560,28 @@ go.enr = function(x, ont='BP', tag=NULL, allx=gmdf$symbol,
     } else {out = c() }
     return(out)
 }
+
+# For wordlets:
+get_summary_terms <- function(dat, binsize=50, filtering=TRUE, tab_all=NULL) {
+    terms_sel <- c();
+    term_words <- strsplit(dat, "[ _,.]");
+    if (is.null(tab_all)){
+        tab_all <- sort(table(unlist(term_words)));
+    }
+    nbins <- floor(length(dat)/binsize);
+    for (bin in 1:nbins) {
+        i <- ((bin-1)*binsize)+1;
+        j <- bin*binsize;
+        tab <- table(unlist(term_words[i:j]));
+        ratio <- log2((tab/binsize) / (tab_all[names(tab)]/length(dat)));
+        ranks <- rank(ratio);
+        if (filtering) ranks[tab < 2] <- NA;
+        term_score <- sapply(term_words[i:j], function(x) {
+                                 mean(ranks[names(ranks) %in% x], na.rm=T);
+    });
+        val <- which.max(term_score);
+        terms_sel <- c(terms_sel, ifelse(length(val)==0, "", dat[i:j][val]));
+    }
+    invisible(terms_sel);
+}
+

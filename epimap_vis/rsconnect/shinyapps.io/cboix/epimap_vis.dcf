@@ -1,0 +1,10 @@
+name: epimap_vis
+title:
+username:
+account: cboix
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2541139
+bundleId: 3649640
+url: https://cboix.shinyapps.io/epimap_vis/
+when: 1600631906.01488

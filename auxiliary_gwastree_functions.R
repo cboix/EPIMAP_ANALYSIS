@@ -16,6 +16,42 @@ library(ComplexHeatmap)
 library(dplyr)
 library(viridis)
 
+# -----------------
+# For pruning SNPs:
+# -----------------
+prune.snps = function(suid, df=gwdf, dist=5e3, quiet=TRUE){
+    subdf = df[df$uid == suid,]
+    keptdf = c()
+    chrlist = c(as.character(1:22), 'X')
+    keptlist = sapply(rep(0, 23), function(x){c()})
+    names(keptlist) = chrlist
+    for (i in 1:nrow(subdf)){
+        chrom = as.character(subdf$chrom[i])
+        loc = subdf$chromStart[i]
+        # Check if any within range/add:
+        if (is.null(keptlist[[chrom]])){
+            keptlist[[chrom]] = loc
+        } else {
+            nclose = sum(abs(loc - keptlist[[chrom]]) < dist)
+            if (nclose ==  0){
+                keptlist[[chrom]] = c(keptlist[[chrom]], loc)
+            }
+        }
+    }
+    # Report out - chrom, loc, uid is sufficient:
+    kdf = c()
+    for (chrom in chrlist){
+        if (!is.null(keptlist[[chrom]])){
+            kdf = rbind(kdf, data.frame(chrom=chrom, 
+                                        chromStart=keptlist[[chrom]],
+                                        uid=suid))
+        }
+    }
+    if (!quiet){ print(paste(suid, ': Kept', nrow(kdf), 'of',nrow(subdf))) }
+    return(kdf)
+}
+
+
 # ----------------
 # Get descendants:
 # ----------------
@@ -67,6 +103,7 @@ get_pvalues = function(strait, dflist, cdlenlist, pdf, cutp=CUTP,
     sgw = aggregate(pValue ~ uid + trait, gwdf[gwdf$trait == strait,], length)
     suid = sgw[order(sgw$pValue, decreasing=T), 'uid'][1]
     # Measure numbers of ingroup SNPs (in any group):
+    # TODO: Allow ingroup parent?
     isubdf = filter(dflist[[ingroup]], uid == suid)
     isnp = rep(0, NN)
     isnp[isubdf$node] = isubdf$nsnp
@@ -164,7 +201,8 @@ get_pvalues_leaves = function(trait, dflist, cdlenlist, declist, cutp=CUTP){
 # trait
 # dflist (all trait x flat interactions)
 # lenlist
-get_pvalues_flat = function(trait, dflist, lenlist, qdf, NF, cutp=CUTP, minp=3){
+get_pvalues_flat = function(trait, dflist, lenlist, qdf, NF, 
+                            cutp=CUTP, minp=3, olen=NULL){
     # Traits:
     if (trait %in% qdf$uid){
         suid = trait
@@ -177,7 +215,7 @@ get_pvalues_flat = function(trait, dflist, lenlist, qdf, NF, cutp=CUTP, minp=3){
     isnp[isubdf$node] = isubdf$nsnp
     # Measure numbers of enhancer snps:
     osnp = filter(qallnumdf, uid == suid)$queryHits
-    olen = length(enhind)
+    if (is.null(olen)){ olen = length(enhind) }
     # Hyper-geometric testing:
     df = cbind(q=isnp, draw=lenlist, m=osnp, N=olen)
     pout <- apply(df, 1, run.hyper)
@@ -192,13 +230,13 @@ get_pvalues_flat = function(trait, dflist, lenlist, qdf, NF, cutp=CUTP, minp=3){
 
 # Take enhancer sets + intersection dataframe
 # Return number of intersecting snps per enhancer set:
-eval.intersections <- function(enhsets, qdf){
+eval.intersections <- function(enhsets, qdf, map.enh=TRUE){
     dflist = c()
     NL = length(enhsets)
     for (i in 1:NL){
         enhset = enhsets[[i]]
         # Map enhset to enhind (necessary for dflist)
-        enhset = enhmap[enhset]
+        if (map.enh) { enhset = enhmap[enhset] }
         enhtmp = merge(qdf, data.frame(subjectHits = enhset))
         if (nrow(enhtmp) > 0){
             # Count number of interactions (enh-snp) in set, add to dataframe:
@@ -254,12 +292,14 @@ setup_dendrogram <- function(dend, ll, udf, declist, altline=3, cutp=CUTP, bcuto
 }
 
 
+# TODO: Stop evaluating parent twice - store llk
 # Is slow. can we speed up by not evaluating certain ones?
 get_lr_pvalues = function(strait, dflist, cdlenlist, pdf, cutp=CUTP, 
                        ingroup='diff', outgroup='cons', against.parent=TRUE){
     # Trait and example place:
     sgw = aggregate(pValue ~ uid + trait, gwdf[gwdf$trait == strait,], length)
     suid = sgw[order(sgw$pValue, decreasing=T), 'uid'][1]
+    # TODO: import NN/NE
     NE = nrow(enhdf)
     pvals = rep(1, NN)
     for (i in 1:NN){
@@ -317,7 +357,8 @@ get_lr_pvalues = function(strait, dflist, cdlenlist, pdf, cutp=CUTP,
 sigm = function(z) {1 / (1 + exp(-z))}
 rsigm = function(p) {log(p / (1 - p))}
 
-calc_disjoint_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NULL){
+# TODO: Add stopping + throw NA if looks like it isnt converging.
+calc_disjoint_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NULL, pctcut=0.0001, calc.pvals=TRUE){
     NE = length(y)
     if (is.null(weights)){ weights = rep(1, NE) } 
     if (is.null(x2)){ x2 = rep(0, NE) }
@@ -335,7 +376,7 @@ calc_disjoint_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=
     NI2 = N - NY - NFP1 - NFP2  # Y=0, X1=0, X2=0, I=1 (remaining loc - NY contains NTP1, NTP2)
     # Initialize coefficients:
     coeff = rep(0,3)
-    pc = 1e-10 # with pseudo counts
+    pc = 0.01 / N # with pseudo counts relative to size of N
     coeff[3] = rsigm((NY - NTP1 - NTP2)/(N - (NX1 + NX2)))
     coeff[1] = rsigm((NTP1 + pc)/(NX1)) - coeff[3]
     if (NX2 > 0){
@@ -345,8 +386,8 @@ calc_disjoint_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=
     }
     j = 1
     pctchange = 100
-    # Update equations::
-    while (pctchange > 0.0001 && j < max.iter){
+    # Update equations:
+    while (pctchange > pctcut && j < max.iter){
         j = j + 1
         oldcoeff = coeff
         # Update x1 (1):
@@ -376,11 +417,52 @@ calc_disjoint_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=
            NTP2 * log(inner2) + NFP2 * log(1 - inner2) + 
            NI1 * log(inner3) + NI2 * log(1 - inner3))
     # Return the parameters:
-    return(list(loglikelihood=llk, coefficients=coeff))
+    out = list(loglikelihood=llk, coefficients=coeff)
+    if (calc.pvals){
+        # Calc second derivatives
+        # x = cbind(x1, x2, rep(1, N))
+        # est = exp(x %*% coeff)
+        # est = est / (1 + est)^2
+        # xw = sweep(x, 1, est, '*')
+        # der2 = t(xw) %*% x
+        # Calc estimates without matrix multiplication:
+        c13 = (exp(coeff[1] + coeff[3]) / (1 + exp(coeff[1] + coeff[3]))^2)
+        c23 = (exp(coeff[2] + coeff[3]) / (1 + exp(coeff[2] + coeff[3]))^2)
+        c3  = (exp(coeff[3]) / (1 + exp(coeff[3]))^2)
+        # Products:
+        der2 = matrix(0, nrow=3, ncol=3)
+        der2[3,3] = NX1 * c13 + NX2 * c23 + (NI1 + NI2) * c3
+        der2[1,1] = NX1 * c13
+        der2[1,3] = NX1 * c13
+        der2[3,1] = NX1 * c13
+        der2[2,2] = NX2 * c23
+        der2[2,3] = NX2 * c23
+        der2[3,2] = NX2 * c23
+        # Disjoint means fast Cholesky decomposition:
+        chdr = sqrt(der2)
+        chdr[3,] = 0
+        chdr[3,3] = sqrt(der2[3,3] - der2[1,3] - der2[2,3])
+        if (NX2 == 0){ chdr = chdr[c(1,3),c(1,3)] } 
+        se <- try(chol2inv(chdr), silent=T) # Non-negligible time
+        # se <- try(chol2inv(chol(der2)), silent=T) # Non-negligible time
+        if (class(se) != 'try-error'){
+            se <- sqrt(diag(se))
+            # Calculate p-vals by Wald's test rather than chisq:
+            if (NX2 == 0){
+                wald <- coeff[c(1,3)] /se
+            } else {
+                wald <- coeff/se
+            }
+            pval <- 2 * pnorm(abs(wald), lower.tail = FALSE)
+            out$pvals = pval
+        }
+    }
+    return(out)
 }
 
 
 
+# TODO: Add stopping + throw NA if looks like it isnt converging.
 # For where x2 is subset of x1
 calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NULL){
     NE = length(y)
@@ -403,6 +485,7 @@ calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NU
     pc = 0.000001  # with pseudo counts
     coeff[3] = rsigm(NY/N)
     coeff[1] = rsigm((NTP1 + pc)/(NTP1 + NFP1)) - coeff[3]
+    # TODO: Doublecheck?
     if (NX2 > 0){
         coeff[2] = rsigm((NTP2 + pc)/(NTP2 + NFP2)) - coeff[3]
     } else {
@@ -444,6 +527,7 @@ calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NU
 }
 
 
+# TODO: Add stopping + throw NA if looks like it isnt converging.
 # For where x2 is subset of x1
 calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NULL){
     NE = length(y)
@@ -466,6 +550,7 @@ calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NU
     pc = 0.000001  # with pseudo counts
     coeff[3] = rsigm(NY/N)
     coeff[1] = rsigm((NTP1 + pc)/(NTP1 + NFP1)) - coeff[3]
+    # TODO: Doublecheck?
     if (NX2 > 0){
         coeff[2] = rsigm((NTP2 + pc)/(NTP2 + NFP2)) - coeff[3]
     } else {
@@ -507,11 +592,14 @@ calc_subset_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NU
 }
 
 
+# TODO: REMOVE Testing data:
 # y = allsnps
 # x = cbind(pann, dann)
 # weights = NULL 
 
 # General fast LR for observations and predictions in {0,1}
+# TODO: Add stopping + throw NA if looks like it isnt converging.
+# TODO: Extend to any sets:
 # Note: Here X is a matrix with ncol = nvar
 calc_general_lr = function(y, x, gamma=0.001, max.iter=1500, weights=NULL){
     ptm <- proc.time()
@@ -526,6 +614,7 @@ calc_general_lr = function(y, x, gamma=0.001, max.iter=1500, weights=NULL){
     ctcounts = rep(0, 2^(NVAR + 1))
     for (vy in c(0, 1)){
         if (vy == 1){ iy = y } else { iy = 1 - y }
+        # TODO: Now extend this to work for diff # of var.
         for (v1 in c(0, 1)){
             if (v1 == 1){ i1 = x[,1] } else { i1 = 1 - x[,1] }
             for (v2 in c(0, 1)){
@@ -588,7 +677,8 @@ calc_general_lr = function(y, x, gamma=0.001, max.iter=1500, weights=NULL){
 }
 
 
-pvalsdf.tolist = function(df, minp, cutp){ 
+# Was causing issues in interpretation, leaving for posterity.
+pvalsdf.tolist.old = function(df, minp, cutp){ 
     df$padj = p.adjust(df$pout)
     df$padj[df$padj == 0] = min(df$padj[df$padj != 0])
     df$rawlog10p = -log10(df$padj)
@@ -599,6 +689,18 @@ pvalsdf.tolist = function(df, minp, cutp){
     ll = list(log10p=df$log10p, rawlp=df$rawlog10p, df=df)
 }
 
+
+# Actually does what it says (raw vs. adjusted)
+pvalsdf.tolist = function(df, minp, cutp){ 
+    df$rawlog10p = -log10(df$pout)
+    df$padj = p.adjust(df$pout)
+    df$padj[df$padj == 0] = min(df$padj[df$padj != 0])
+    # Cap and threshold the adjusted log10p:
+    df$log10p = -log10(df$padj)
+    df$log10p[df$log10p < minp] = 0
+    df$log10p[df$log10p > cutp] = cutp
+    ll = list(log10p=df$log10p, rawlp=df$rawlog10p, df=df)
+}
 
 # ALTERNATE REGRESSION (slower):
 # dmodel = calc_disjoint_lr(y=allsnps, x1=pann, x2=dann, gamma=gamma, weights=weights)
@@ -626,6 +728,7 @@ alt_lr = function(y, x1, x2=NULL, gamma=0.001, max.iter=1500, weights=NULL){
 }
 
 
+# TODO: Clean up function + put in chunks
 get_disjoint_lr = function(trait, type, against, qdf, minp=3, cutp=CUTP, 
                            weights=NULL, verbose=FALSE, return.coeff=FALSE, 
                            alt.lr=FALSE, max.iter=1500){
@@ -672,9 +775,12 @@ get_disjoint_lr = function(trait, type, against, qdf, minp=3, cutp=CUTP,
             parent = declist$parent[i]
             d2 = which(declist$parent == parent)
             p = d2[d2 != i]
+            # TODO: write get sibling
+            # TODO: will need different regression logic
         } else if (against == 'enhancers'){
             pset = 1:NE
             p = 1 # Put the output here - same parent regression
+            # TODO: Will different regression - for difference
             # All enhancers vs. all enhancers + node enhancers (separately)
             # - need to update calc_disjoint_lr to do NONDISJOINT.
         }
@@ -839,6 +945,7 @@ get.linked.genes = function(ll, suid, by.cons=TRUE, minp=3, allgenes=FALSE){
     # Link to genes:
     if (!by.cons){
         # Option 1: Linked genes by linking agnostic to trees:
+        # TODO: Need to do linking first for this!
     } else {
         # Option 2: Linked genes by the RNA-seq consensus:
         # 3. Get consensus genes at each node:

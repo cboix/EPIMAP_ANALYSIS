@@ -32,6 +32,7 @@ usetree = 'enhancers'
 # usetree = 'gwastree'
 # usetree = 'correlation'
 # usetree = 'roadmap'
+# TODO: add option for weighted enhancers?
 tol = 2500  # Plus/minus distance - window for enhancer overlaps
 singlematch = FALSE # Use 1-to-1 SNP enhancer mapping only?
 plotting.only = TRUE # Load data for plotting only?
@@ -114,10 +115,9 @@ if (!file.exists(gwrdafile)){
     # if there was no already retained SNP on the same chromosome within 1 Mb.
     # ------------------------------------------------------------------------
     # Order catalog by SNP significance:
-    print("[STATUS] Pruning GWAS catalog - keeping most significant w/in 1 Mb")
     gwdf = gwdf[order(gwdf$pValue),]
     # Prune, on a per-uid basis:
-    prune.snps = function(suid, df=gwdf, dist=1e6, quiet=TRUE){
+    prune.snps = function(suid, df=gwdf, dist=5e3, quiet=TRUE){
         subdf = df[df$uid == suid,]
         keptdf = c()
         chrlist = c(as.character(1:22), 'X')
@@ -150,6 +150,7 @@ if (!file.exists(gwrdafile)){
     }
     # Prune:
     ut = unique(gwdf$uid)
+    print("[STATUS] Pruning GWAS catalog - keeping most significant w/in 5000")
     kept.snps = ldply(ut, df=gwdf, dist=5e3, prune.snps)
     print(dim(gwdf))
     gwdf = merge(kept.snps, gwdf)
@@ -193,7 +194,7 @@ if (!plotting.only){
     # -------------------------------------------------
     # Overlap SNPs with enhancers, with some tolerance:
     # -------------------------------------------------
-    dmgr = GRanges(enhdf$chr, IRanges(enhdf$start - tol, enhdf$end + tol))
+    dmgr = GRanges(enhdf$chr, IRanges(enhdf$start - tol, enhdf$end + tol), name=enhdf$name)
     if (!file.exists(gwintrdafile)){
         print('[STATUS] Overlapping SNPs with enhancers')
         qdf = suppressWarnings(data.frame(findOverlaps(gwgr, dmgr)))
@@ -273,6 +274,12 @@ if (usetree == 'enhancers' || usetree == 'roadmap'){
     dend3 = set(dend3, "labels_cex", .18)
     NL = length(lab)
 
+    savetree.file = paste0('hierarchicaltree_',usetree,'_20200706.Rda')
+    if (!file.exists(savetree.file)){
+        save(ht, file=savetree.file)
+    }
+
+
     if (plot.trees){
         pdf(paste0(imgpref, sub("\\.","_",method),"_link_jacc.pdf"), width=14.5, height=12, onefile=T)
         plot.new()
@@ -339,6 +346,7 @@ if (usetree == 'enhancers' || usetree == 'roadmap'){
 # Load gwas matrix for tree creation
 # ----------------------------------
 if (usetree == 'gwastree'){
+    # TODO: If we use this, run with SAME window - 2500
     gwasfile = 'observed_aux_18_on_mixed_impobs_QCUT_ENH_bin_on_mixed_impobs_5000_enrich.tsv'
     filepref = 'cls_merge2_wH3K27ac100_raw'
     gwlindf = read.delim(gwasfile, header=F)
@@ -678,37 +686,58 @@ if (as.logical(anyDuplicated(labels_dend))) {
     labels_dend <- labels(dend3) }
 
 # For counting:
-dend4 = set(dend3, 'nodes_pch', 1:NN)
-declist = list(dec=sapply(rep(NA, NN), list), isleaf=rep(NA, NN), parent=rep(NA, NN))
-declist = get_dec(dend4, declist=declist)
-declist$parent[1] = 1
-pdf = data.frame(node=1:length(declist$parent), parent=declist$parent)
+ntmeta.rda = paste0('enhancer_tree_metadata.Rda')
+if (!file.exists(ntmeta.rda)){
+    dend4 = set(dend3, 'nodes_pch', 1:NN)
+    declist = list(dec=sapply(rep(NA, NN), list), isleaf=rep(NA, NN), parent=rep(NA, NN))
+    declist = get_dec(dend4, declist=declist)
+    declist$parent[1] = 1
+    pdf = data.frame(node=1:length(declist$parent), parent=declist$parent)
 
-# Get the component cell/tissue groups for the large nodes
-leafmeta = data.frame(label=labels(dend3), id=lab, GROUP=meta[lab,'GROUP'])
-leafmeta$label = as.character(leafmeta$label)
-nodemeta = ldply(1:NN, function(i){ 
-                     x = declist$dec[[i]]
-                     df = data.frame(node=i, GROUP=leafmeta[leafmeta$label %in% x,'GROUP'], count=1) 
-                     df = aggregate(count ~ node + GROUP, df, length)
-                     df$total = sum(df$count)
-                     df$frac = df$count/df$total
-                     # NOTE: Deal with 50-50 cases (neither max) with avg:
-                     df$rank = rank(-df$frac, ties.method='average')
-                     # Maximal if at least some fraction and max:
-                     fcut = 0.5
-                     j = which((df$rank == 1) * (df$frac > fcut) == 1)
-                     if (length(j) == 0){ df$maxgroup = 'Multiple' 
-                     } else { df$maxgroup = df$GROUP[j] }
-                     return(df)
-                    })
+    # Get the component cell/tissue groups for the large nodes
+    # leafmeta = data.frame(label=labels(dend3), id=lab, GROUP=meta[lab,'GROUP'])
+    leafmeta = data.frame(label=labels(dend3), id=lab, GROUP=meta[lab,'GROUP'], second=meta[lab, 'SECONDARY'])
+    leafmeta$label = as.character(leafmeta$label)
+    nodemeta = ldply(1:NN, function(i){ 
+                         x = declist$dec[[i]]
+                         df = data.frame(node=i, GROUP=leafmeta[leafmeta$label %in% x,'GROUP'], count=1, second=leafmeta[leafmeta$label %in% x,'second']) 
+                         df2 = df
+                         df2$GROUP[df2$GROUP == 'Cancer'] = df2$second[df2$GROUP == 'Cancer']
+                         df = aggregate(count ~ node + GROUP, df, length)
+                         df$total = sum(df$count)
+                         df$frac = df$count/df$total
+                         df2 = aggregate(count ~ node + GROUP, df2, length)
+                         df2$total = sum(df2$count)
+                         df2$frac = df2$count/df2$total
+                         # NOTE: Deal with 50-50 cases (neither max) with avg:
+                         df$rank = rank(-df$frac, ties.method='average')
+                         df2$rank = rank(-df2$frac, ties.method='average')
+                         # Maximal if at least some fraction and max:
+                         fcut = 0.5
+                         j = which((df$rank == 1) * (df$frac > fcut) == 1)
+                         if (length(j) == 0){ df$maxgroup = 'Multiple' 
+                         } else { df$maxgroup = df$GROUP[j] }
+                         j = which((df2$rank == 1) * (df2$frac > fcut) == 1)
+                         if (length(j) == 0){ df2$maxgroup = 'Multiple' 
+                         } else { df2$maxgroup = df2$GROUP[j] }
+                         df$type = 'simple'
+                         df2$type = 'second'
+                         df = rbind(df, df2)
+                         return(df)
+                   })
 
-nodetissue = unique(nodemeta[, c('node','total','maxgroup')])
-names(nodetissue)[3] = 'GROUP'
-nodetissue =merge(nodetissue, rdcol, all.x=TRUE)
-nodetissue$COLOR[is.na(nodetissue$COLOR)] = 'grey80'  # Add color for Multiple
-nodetissue$category[is.na(nodetissue$category)] = 'Other'  # Add color for Multiple
-nodetissue.stats = aggregate(node ~ GROUP, nodetissue, length) # Only 191 assigned to 1
+    nodetissue = unique(nodemeta[nodemeta$type == 'simple', c('node','total','maxgroup')])
+    names(nodetissue)[3] = 'GROUP'
+    nodetissue =merge(nodetissue, rdcol, all.x=TRUE)
+    nodetissue$COLOR[is.na(nodetissue$COLOR)] = 'grey80'  # Add color for Multiple
+    nodetissue$category[is.na(nodetissue$category)] = 'Other'  # Add color for Multiple
+    nodetissue = nodetissue[order(nodetissue$node),]
+    nodetissue.stats = aggregate(node ~ GROUP, nodetissue, length) # Only 191 assigned to 1
+
+    save(nodetissue, declist, nodetissue.stats, nodemeta, leafmeta, file=ntmeta.rda)
+} else {
+    load(ntmeta.rda)
+}
 
 # Mapping: dendlist
 mapdl = data.frame(id=labels(dend), lab=labels(dend3))
@@ -815,6 +844,7 @@ if (!file.exists('expanded_traitlist.txt')){
 # ------------------------------
 # Get the leaf pvals by HG test:
 # ------------------------------
+# TODO: currently for debugging, could keep/improve or throw out:
 leaffile = paste0('logreg', midpref, 'leaf_hgpvals_elist.Rda')
 if (!file.exists(leaffile)){
     print("[STATUS] Calculating pvals for leaves by HG test")
@@ -833,6 +863,7 @@ if (!file.exists(leaffile)){
 # ------------------------------
 # Get the leaf pvals by HG test:
 # ------------------------------
+# TODO: currently for debugging, could keep/improve or throw out:
 all.leaffile = paste0('logreg', midpref, 'leaf_hgpvals_alltraits.Rda')
 if (!file.exists(all.leaffile)){
     ut = as.character(unique(gwdf$uid))

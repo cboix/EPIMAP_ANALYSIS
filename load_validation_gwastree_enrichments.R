@@ -23,7 +23,8 @@ tol = 2500
 singlematch = FALSE
 plotting.only = FALSE  # No, need to run the regressions
 use.adj = TRUE
-use.strict = TRUE
+# use.strict = TRUE
+use.strict = FALSE
 if (length(statargs)==0) {
     print("Using default arguments. Only loading what is needed for plotting")
 } else {        

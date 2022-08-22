@@ -17,6 +17,7 @@
 general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1, 
                               seed=NULL, hjust=0.5, vjust=0.5,
                               force = 1, force_pull = 1, max.iter = 2000,
+                              max.overlaps = 25,
                               xlim = c(NA, NA), ylim = c(NA, NA), direction = "both"){
     require(ggrepel)
     require(rlang)
@@ -31,12 +32,14 @@ general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1,
     # The padding around each bounding box (for now, based on the height)
     box_padding_x <- .1 * mean(box_heights)
     box_padding_y <- .1 * mean(box_heights)
+    # TODO: Allow specifying box.padding?
     # box_padding_x <- convertWidth(x$box.padding, "native", valueOnly = TRUE)
     # box_padding_y <- convertHeight(x$box.padding, "native", valueOnly = TRUE)
 
     # --------------
     # Point padding:
     # --------------
+    # TODO: Get padding from pt.cex and pch:
     # if (is.na(x$point.padding)) { x$point.padding = unit(0, "lines") }
     # point_padding_x <- convertWidth(x$point.padding, "native", valueOnly = TRUE)
     # point_padding_y <- convertHeight(x$point.padding, "native", valueOnly = TRUE)
@@ -46,6 +49,7 @@ general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1,
     # if (length(x$point.size) == 1 && is.na(x$point.size)) { x$point.size = unit(0, "lines") }
     # point_size <- convertWidth(x$point.size, "native", valueOnly = TRUE)
     # point_size <- convertWidth(x$point.size, "native", valueOnly = TRUE)
+    # TODO: Fix this and calculate the real point size:
     point_size = strheight('a', cex=pt.cex)
 
     # Do not create text labels for empty strings.
@@ -67,6 +71,7 @@ general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1,
     if (is.null(seed) || !is.na(seed)) { set.seed(seed) }
     points_valid_first <- cbind(c(x[valid_strings], x[invalid_strings]),
                                 c(y[valid_strings], y[invalid_strings]))
+    # Re-adjust point size (TODO: seems redundant - fix)
     if (length(point_size) != length(x)) {
         point_size <- rep_len(point_size, length.out=length(x)) 
     }
@@ -77,8 +82,8 @@ general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1,
     # .Call("_ggrepel_repel_boxes", PACKAGE = "ggrepel", data_point
     #       point_padding_x, point_padding_y, boxes, xlim, ylim,
     #       hjust, vjust, force, maxiter, direction)
-    repel <- ggrepel:::repel_boxes(data_points = points_valid_first,
-                                   # point_size = point_size,
+    repel <- ggrepel:::repel_boxes2(data_points = points_valid_first,
+                                   point_size = point_size,
                                    point_padding_x = point_padding_x,
                                    point_padding_y = point_padding_y,
                                    boxes = do.call(rbind, boxes),
@@ -88,9 +93,11 @@ general_repel_text = function(x, y, labels, cex=1, pch=19, pt.cex=1,
                                    hjust = hjust %||% 0.5,
                                    vjust = vjust %||% 0.5,
                                    # NOTE: Defaults from ggrepel
-                                   force = force * 1e-6,
+                                   force_pull = force * 1e-6,
+                                   force_push = force * 1e-6,
                                    # force_pull = force_pull * 1e-2,
-                                   maxiter = max.iter,
+                                   max_overlaps=max.overlaps,
+                                   max_iter = max.iter,
                                    direction = direction)
     return(data.frame(x=repel$x, y=repel$y,
                       # Position of original data points.

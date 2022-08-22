@@ -103,3 +103,4 @@ for (onto in names(ID_select_per_onto)) {
     res_all[[onto]][is.na(res_all[[onto]])] <- 0;
 }
 save(res_all, file=paste(outputdir, "/res_all_per_onto.RData", sep=""))
+

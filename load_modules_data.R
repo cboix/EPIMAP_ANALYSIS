@@ -58,6 +58,8 @@ print(paste0("Loaded file with shape: ",
 
 # Reduce to epigenomes. 
 # Split and merge names if necessary. 
+# TODO: Also create plots with state?
+# TODO: Plot each chmm element with appropriate colors?
 filtcutoff = 0.01
 centdf = data.frame(centers, nam=rownames(centers))
 clong = gather(centdf, cls, value, -nam)
@@ -96,8 +98,10 @@ centlist[[tagline]] = cmat
 # Hypergeometric testing for enrichment for clusters:
 # ---------------------------------------------------
 # Run hypergeometric for each comb, make table:
+# TODO: Add Enrichment against metadata 
 # - Aka which clusters are more adult vs. which top (1-2) CT
 # For each cluster center, evaluate against each metadata column
+# TODO: Add also the availability of different marks as enrichment factor
 # ---------------------------------------------------
 # Generate for all:
 threshold = 0.1
@@ -113,7 +117,8 @@ run.fisher <- function(y){
 hdf = filter(cred, value > threshold)
 hdf = merge(hdf, meta[,c('id',covariates)])
 # For each cluster (relabel) - test
-keptid = levels(reducenames$id)
+# keptid = levels(reducenames$id)
+keptid = unique(reducenames$id)
 submeta = meta[keptid,]
 
 hgdf = NULL
@@ -156,6 +161,7 @@ hgmat[hgmat < 2] <- 0
 rownames(hgmat) = hgwide$cl
 
 # Reduce the plot to top 2-3 cells + top of others.
+# TODO Add histones
 enrichmat = matrix("unknown/mixed", nrow=ncol(cmat), ncol=ncol(metamat),
                    dimnames = list(colnames(cmat), colnames(metamat)))
 for (cov in covariates){
@@ -174,6 +180,7 @@ for (cov in covariates){
 # ---------------------------
 # Plot clusters side by side:
 # ---------------------------
+# TODO: Make these functions standalone
 plot.centers = function(centers, set, cellorder, counts, calc.only=FALSE, title=TRUE,
                         subset=FALSE, cls=acut.nam, cls.ord=NULL, palette=col1, ablwd=1){
     mat = centers[[set]]
@@ -363,6 +370,7 @@ plot_clusters_vsmall <- function(rnorder, acutnamed, lablist, plot.rect=FALSE, s
     meta.image(metamat[rnorder,5:1], colvals=colvals, cex=0, horiz=T, useRaster=TRUE)
     abline(h=par()$usr[3:4],lty=1,lw=0.5)
     abline(v=par()$usr[1:2],lty=1,lw=0.5)
+    # TODO: make small text repel function:
     box.pad = 0.018 + 0.002 * small  + 0.003 * tiny
     xx = space.1d(lablist[[1]], box.pad=box.pad, lim=c(0 + 1e-3, 1 - 1e-3))
     xx = space.1d(xx, box.pad=box.pad, lim=c(0 + 1e-3, 1 - 1e-3))

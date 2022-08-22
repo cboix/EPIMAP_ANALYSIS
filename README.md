@@ -1,4 +1,3 @@
-### Epimap Analysis code repository
-Epimap (Epigenome Integration across Multiple Annotation Projects) downloading, processing, ChromHMM/ChromImpute, clustering, and all subsequent analysis code. 
+# EPIMAP_ANALYSIS
 
-*Contact:* cboix at mit
+EpiMap analysis code repository - datadownloading and pre+post-processing for imputation, annotation, and analysis

@@ -31,8 +31,8 @@ rdcol = rdcol[order(rdcol$COLOR, decreasing=T), ]
 
 # Metadata for imputation datasets:
 rd.map = read.delim('Annotation/updated_imputation_metadata.tsv',header=T, stringsAsFactors=F)
-meta = rd.map[,c('BSSID','sample.name','newgroup','secondary','Extended.Info','origin','perturb','lifestage','age','sex','type')]
-names(meta)[1:5] = c('id','ct','GROUP','SECONDARY','infoline')
+meta = rd.map[,c('BSSID','SampleName','Group','Secondary','Extended.Info','Origin','Perturb','Lifestage','Age', 'AgeUnits','Sex','Type')]
+names(meta) = c('id','ct','GROUP','SECONDARY','infoline', 'origin','perturb','lifestage','age','age.units','sex','type')
 rdcol = rdcol[rdcol$GROUP %in% unique(meta$GROUP),]
 meta = merge(meta, rdcol)
 meta[is.na(meta)] <- ''
@@ -123,11 +123,12 @@ roadmap.colors = read.delim('Annotation/roadmap_eid_colormap.tsv', stringsAsFact
 rdacc = read.delim('Annotation/roadmap_accession_mapping.tsv', stringsAsFactors=F)
 
 # Load information on whether a sample is roadmap or not:
+# TODO: Only 860 samples?
 accfile = 'accession_bssid_mark_extended.tsv'
 if (!file.exists(accfile)){
     accmap = read.delim('accession_bssid_mark.tsv', header=F, stringsAsFactors=F)
     names(accmap) = c('Accession','id','Epitope')
-    filemeta = read.delim('Annotation/file_extended_metadata_20180128.tsv', header=T, stringsAsFactors=F)
+    filemeta = read.delim('Annotation/file_extended_metadata_20190128.tsv', header=T, stringsAsFactors=F)
     accmap = merge(accmap, unique(filemeta[,c('Accession','Project',
                                               'replicates.library.biosample.donor.accession')]), all.x=T)
     names(accmap)[5] = 'Donor'

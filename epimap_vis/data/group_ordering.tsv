@@ -1,0 +1,34 @@
+GROUP	COLOR	category
+Adipose	#AF5B39	Tissue
+Bone	#6FB7EB	Tissue
+Digestive	#C58DAA	Tissue
+Endocrine	#99C1FF	Tissue
+Heart	#D56F80	Tissue
+Kidney	#660000	Tissue
+Liver	#5151E7	Tissue
+Lung	#D9D2E9	Tissue
+Mesench	#B65C73	Tissue
+Muscle	#C2655D	Tissue
+Myosat	#E67326	Tissue
+Pancreas	#87A3E1	Tissue
+Placenta & EEM	#E10000	Tissue
+Reproductive	#3383FF	Tissue
+Sm. Muscle	#F182BC	Tissue
+Urinary	#A783D6	Tissue
+Endothelial	#FFCA0C	Primary Cell
+Epithelial	#FF9D0C	Primary Cell
+Stromal	#FF720C	Primary Cell
+Blood & T-cell	#678C69	Immune
+HSC & B-cell	#55A354	Immune
+Lymphoblastoid	#4D9C8D	Immune
+Spleen	#85CF66	Immune
+Thymus	#DAB92E	Immune
+Brain	#C5912B	Neural
+Eye	#EAD1DC	Neural
+Neurosph	#FFD924	Neural
+PNS	#DDB796	Neural
+ES-deriv	#4178AE	Stem-like
+ESC	#924965	Stem-like
+iPSC	#69608A	Stem-like
+Cancer	#000000	Other
+Other	#999999	Other

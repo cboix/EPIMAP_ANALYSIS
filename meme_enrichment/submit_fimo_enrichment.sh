@@ -57,6 +57,8 @@ qsub -cwd -t 1-$INUM -l h_vmem=8G -l h_rt=01:00:00 -P compbio_lab -j y -b y -V -
 # a. Aggregate raw fimo outputs:
 qsub -cwd -l h_vmem=10G -l h_rt=01:00:00 -P compbio_lab -j y -b y -V -r y -o $DBDIR/out/annotate -N aggregate_fimo_${UQID} -hold_jid getcounts_${UQID} "source activate mv_env; R --slave -f $BINDIR/meme_enrichment/aggregate_raw_fimo_results.R --args ${INFOFILE} ${RESULTDIR}"
 
+# TODO: USING DB - AGGREGATE INDPTLY TO CREATE BACKGROUND!
+
 # b. Compute pvals in parallel (othw too slow):
 echo "[STATUS] Submitting jobs to parse raw GREAT results for $INUM files in ${RESULTDIR}"
 qsub -cwd -t 1-$INUM -l h_vmem=10G -l h_rt=01:00:00 -P compbio_lab -j y -b y -V -r y -o $DBDIR/out/annotate -N parse_fimo_${UQID} -hold_jid aggregate_fimo_${UQID} "source activate mv_env; R --slave -f $BINDIR/meme_enrichment/parse_fimo_results.R --args ${INFOFILE} ${RESULTDIR}"

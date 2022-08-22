@@ -58,6 +58,7 @@ plot.circos.tree = function(dend, ntdf=NULL, track.height=0.5, curved.lines=FALS
                          ntdf$maxy = sapply(ntdf$maxy, function(x){min(0.5, x)})
                          ntdf$ry = runif(nrow(ntdf), min=min(.05, ntdf$maxy), 
                                          max=ntdf$maxy)
+                         # TODO: Avoid collisions by making the ones next to each other change dist.
                          lndf = ntdf[ntdf$face == 0,]
                          rndf = ntdf[ntdf$face == 1,]
                          if (nrow(rndf) > 0){
@@ -292,6 +293,7 @@ circleplot_split = function(dend, lab, NCLUST, with.tree=TRUE, only.diff=FALSE, 
 
 
 calculate.curve = function(x1,x2, y1,y2, curve=NULL) {
+    # TODO check direction:
     if (is.null(curve)){
         # Curve for connecting line:
         sq = seq(-4,max(y1 - y2 * 20, 8), length.out=50)

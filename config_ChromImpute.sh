@@ -3,16 +3,23 @@
 export DOMAIN=$(hostname -d)
 if [[ $DOMAIN == 'broadinstitute.org' ]]; then
     export MAINDIR=/broad/compbio/cboix
+    export CEDIR=/broad/compbio_ce/cboix
     export SFTDIR=${MAINDIR}/software
-else
+elif [[ $DOMAIN == 'localdomain' ]]; then
     export MAINDIR=$HOME
-    export SFTDIR=${HOME}/local
+    export CEDIR=$HOME
+    export SFTDIR=$HOME/local
+else
+    export MAINDIR=$HOME/data
+    export CEDIR=$HOME/data/DEVTRAJ/db/
+    export SFTDIR=${MAINDIR}/software
+    export TMP=${MAINDIR}/tmp
 fi
 export DBDIR=${MAINDIR}/EPIMAP_ANALYSIS/db
 export BINDIR=${MAINDIR}/EPIMAP_ANALYSIS/bin
 export IMGDIR=${MAINDIR}/EPIMAP_ANALYSIS/img
 export ANNDIR=${DBDIR}/Annotation
-export SNDIR=${BINDIR}/snake_pipe
+export SNDIR=${BINDIR}/preprocessing_pipeline
 export OUTDIR=$DBDIR/out/ChromImpute
 mkdir -p ${DBDIR}/out $OUTDIR $ANNDIR ${DBDIR}/out/annotate
 start=`date +%s`
@@ -31,12 +38,16 @@ export MEM=8  # Memory for ChromHMM runs
 export LD_LIBRARY_PATH=${SFTDIR}/bzip2-1.0.6:${LD_LIBRARY_PATH}
 export LD_LIBRARY_PATH=${SFTDIR}/miniconda2/envs/mv_env/lib/:${LD_LIBRARY_PATH}
 
+# Must run to activate conda for if needed locally:
+source $(conda info --base)/etc/profile.d/conda.sh
+
 # ChromImpute and ChromHMM:
 # NOTE: If malfunctioning, remake using: make clean; make
 export CHROMIMPUTE=${BINDIR}/ChromImpute_SRC/ChromImpute.jar
 export CHROMHMM=${SFTDIR}/ChromHMM/ChromHMM.jar
 export GWASJAR=${BINDIR}/gwas_enrichment/StateMWGwasPeakHyper.jar
 export MVDIR=${MAINDIR}/MOTIF_VALIDATION/
+# TODO add LDAK binaries
 
 # Genome Annotation Files (all for hg19)
 export MAPDIR=$ANNDIR/umap
@@ -130,12 +141,14 @@ mkdir -p ${CHMMDIR} ${CHMM_FMTDIR} ${FILEDIR} ${CALLDIR} $RDCHMMDIR
 
 # List all CHMM experimental data:
 export DATATAG="c_t.sub"
-if [[ ! -s $EXPTINFO ]] || [[ ! -s $CELLINFO ]]; then
-    cd ${CHMM_FMTDIR}
-    ls */BSS[0-9]*_${DATATAG}_chr1_binary.txt.gz | awk -vOFS="\t" '{a=$0; sub("/","\t",a); sub("_c.*gz","",a); sub("_chr1.*gz","",$0); print a,$0}' | awk -vOFS="\t" '{print $2,$1,$3}' | sort -u > $EXPTINFO
-    # NOTE: There are about 40 cells with CTCF only. They will be fully imputed.
-    awk '$2 ~ /^H[1234]/||/CTCF/||/DNase-seq/||/ATAC-seq/{print $1}' ${EXPTINFO} | sort -u > ${CELLINFO}
-    cd $CHMMDIR
+if [[ $DOMAIN == 'broadinstitute.org' ]]; then
+    if [[ ! -s $EXPTINFO ]] || [[ ! -s $CELLINFO ]]; then
+        cd ${CHMM_FMTDIR}
+        ls */BSS[0-9]*_${DATATAG}_chr1_binary.txt.gz | awk -vOFS="\t" '{a=$0; sub("/","\t",a); sub("_c.*gz","",a); sub("_chr1.*gz","",$0); print a,$0}' | awk -vOFS="\t" '{print $2,$1,$3}' | sort -u > $EXPTINFO
+        # NOTE: There are about 40 cells with CTCF only. They will be fully imputed.
+        awk '$2 ~ /^H[1234]/||/CTCF/||/DNase-seq/||/ATAC-seq/{print $1}' ${EXPTINFO} | sort -u > ${CELLINFO}
+        cd $CHMMDIR
+    fi
 fi
 
 # Public directories:
@@ -178,7 +191,9 @@ fi
 export NCALLDIR=${CALLDIR}/${MODELNAME}
 export STATEDIR=${NCALLDIR}/STATEBYLINE
 export MODEL_FILE=${ANNDIR}/ChromHMM_model_${MODELNAME}_states.txt
-cat $MODEL_LOC > $MODEL_FILE
+if [[ -s $MODEL_LOC ]]; then
+    cat $MODEL_LOC > $MODEL_FILE
+fi
 mkdir -p ${NCALLDIR} ${STATEDIR} ${FREQDIR}
 
 # Information tables:
@@ -191,6 +206,7 @@ export FULLIMPUTATION_TAB=${CIDIR}/full_imputation_table.tsv
 export MARKS_LIST=${CIDIR}/marks_available.tsv
 export IMPOBS_TAB=${CIDIR}/impobs_table_fordist.tsv
 export ALL_TRACKS_TAB=${CIDIR}/all_impobs_tracks_table.tsv
+export MATCH_TRACKS_TAB=${CIDIR}/matched_impobs_tracks_table.tsv
 export ALL_UQ_TAB=${CIDIR}/all_impobs_tracks_uniq_table.tsv
 export MIXOBS_TAB=${CIDIR}/mixobs_table_fordist.tsv
 export DIFF_TAB=${CIDIR}/obsimp_diff_table_fordist.tsv
@@ -217,6 +233,29 @@ if [[ ! -s $LOCOORD ]] || [[ ! -s $CORECOORD ]]; then
     wc -l $CORECOORD
 fi
 
+# Non-overlapping coordinates for DHS masterlist:
+if [[ $DOMAIN == 'broadinstitute.org' ]]; then
+    export NON_DMLPREF=${DML_DIR}/masterlist_DHSs_733samples_WM20180608_nonovl_any_coords
+    export NON_MLCOORD=${NON_DMLPREF}.txt
+    export NON_LOCOORD=${NON_DMLPREF}_hg19.txt
+    export NON_CORECOORD=${NON_DMLPREF}_hg19.core.srt.txt
+    export NON_NUMCOORD=${NON_CORECOORD%txt}numbered.txt
+    # Ensure masterlist coords are in hg19:
+    if [[ ! -s $NON_LOCOORD ]] || [[ ! -s $NON_CORECOORD ]]; then
+        liftOver ${NON_MLCOORD} ${LOCHAIN} ${NON_LOCOORD} $DML_DIR/ml_nonovl.over.unmapped
+        # Take core only + sort (separately)
+        awk '$1 ~ /^chr[0-9X][0-9]?$/' ${NON_LOCOORD} | sort -k1,1V > ${NON_DMLPREF}_hg19.core.txt
+        sort -k1,1V -k2n ${NON_DMLPREF}_hg19.core.txt > ${NON_CORECOORD}
+        # Number 
+        awk '{print NR, $1"-"$2"-"$3}' ${NON_CORECOORD} | sort +0 -1 > ${NON_NUMCOORD}
+        # Print number of regions in each:
+        wc -l ${NON_MLCOORD}
+        wc -l ${NON_LOCOORD}
+        wc -l ${NON_CORECOORD}
+    fi
+fi
+
+
 # Enrichment directories:
 export GO_DIR=${DBDIR}/go_enrichments
 export GWAS_DIR=${DBDIR}/gwas_enrichments
@@ -232,6 +271,7 @@ export REF_GENOME_FULL=${REF_GATK}/${GENOME_PREF}.fasta  # Primary + decoys + al
 if [[ ! -s $CHROMSIZES ]]; then
     wget http://hgdownload.cse.ucsc.edu/goldenpath/hg19/database/chromInfo.txt.gz -O $CHROMSIZES\.gz
     gunzip -c $CHROMSIZES.gz | awk -F"\t" -vOFS="\t" '$1 ~ /chr[0-9XY]+$/{print $1,$2}' > $CHROMSIZES
+    awk -F"\t" -vOFS="\t" '$1 ~ /chr[0-9X]+$/{print $1,$2}' $CHROMSIZES > ${CHROMSIZES_noY}
     rm $CHROMSIZES.gz
 fi
 

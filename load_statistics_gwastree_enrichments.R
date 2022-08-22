@@ -25,6 +25,7 @@ singlematch = FALSE
 plotting.only = FALSE  # No, need to run the regressions
 use.adj = TRUE
 use.strict = TRUE
+use.onecutoff = FALSE
 if (length(statargs)==0) {
     print("Using default arguments. Only loading what is needed for plotting")
 } else {        
@@ -36,6 +37,7 @@ if (length(statargs)==0) {
     }
     if (length(statargs) > 4){ use.adj = as.logical(statargs[5]) }
     if (length(statargs) > 5){ use.strict = as.logical(statargs[6]) }
+    if (length(statargs) > 6){ use.onecutoff = as.logical(statargs[7]) }
 }
 
 # Load in + process all of the relevant matrices/datasets:
@@ -43,7 +45,7 @@ commandArgs <- function(trailingOnly=TRUE){
     c(usetree, tol, singlematch, plotting.only) }
 source(paste0(bindir, 'load_gwastree_analysis.R'))
 
-rm(dflist)
+# if (plotting.only){ rm(dflist) }
 
 # ----------------------------------------
 # Make sub-directories for data and plots:
@@ -52,15 +54,23 @@ imgdir = paste0(img, "gwas_tree_analysis/statistics/")
 cmd = paste0('mkdir -p ', imgdir)
 system(cmd)
 eprefix = paste0(usetree, '_e', tol, '_')
+extpref = eprefix
 imgpref = paste0(imgdir, eprefix)
 treeimgpref = paste0(img, "gwas_tree_analysis/", eprefix)
 if (use.adj){ 
     imgpref = paste0(imgpref, 'adj_') 
     treeimgpref = paste0(treeimgpref, 'adj_') 
+    extpref = paste0(extpref, 'adj_')
 }
 if (use.strict){
     imgpref = paste0(imgpref, 'p1_') 
     treeimgpref = paste0(treeimgpref, 'p1_') 
+    extpref = paste0(extpref, 'p1_')
+}
+if (use.onecutoff){
+    imgpref = paste0(imgpref, 'onecut_') 
+    treeimgpref = paste0(treeimgpref, 'onecut_') 
+    extpref = paste0(extpref, 'onecut_')
 }
 
 # Under dbdir:
@@ -87,15 +97,17 @@ if (weighted){
     weights = NULL
 }
 
-# Read in regression files:
 # for (suffix in c("_adj1000_1.Rda", "_adj1000_5.Rda", "_adj1000_10.Rda")){
-if (use.adj){ 
-    suffix = '_adj1000_10.Rda' 
-} else { suffix = '.Rda' }
+# Read in regression files:
+if (use.adj){ suffix = '_adj1000_10.Rda' } else { suffix = '.Rda' }
 if (use.strict){ suffix = '_adj1000_1.Rda' }
-all.regfile = paste0(regpref, apref, '_logreg_all', suffix)
+if (use.onecutoff){ cutsuff = '_onecut' } else { cutsuff = '' }
+
+all.regfile = paste0(regpref, apref, '_logreg_all', cutsuff, suffix)
 print(all.regfile)
 if (!file.exists(all.regfile)){
+    setpref=''
+    # load(paste0(gtdir, 'agg_raw_pvals', setpref, '_20200218.Rda'))
     print("[STATUS] Compiling regression files")
     flist = list.files(path=regdir, pattern=paste0(eprefix, apref, ".*_lreg", suffix))
     uids = sort(as.character(unique(gwdf$uid)))
@@ -106,8 +118,31 @@ if (!file.exists(all.regfile)){
         fnum = as.numeric(fnum)
         load(paste0(regdir, rfile))
         if (class(ll) == 'list'){
-            all.regmat[fnum, ] = ll$rawlp
+            all.regmat[fnum, ] = -log10(ll$df$pout)
         }
+    }
+    # Add correction here:
+    pcutdf = read.delim(paste0(gtdir, 'cutoffs_l10', setpref, '_all_pernode.tsv'))
+    pcutdf = pcutdf[order(pcutdf$node),]
+    if (use.adj){
+        if (use.onecutoff){
+            if (use.strict){
+                fper = pcutdf[pcutdf$type == 'All 0.1%','cut']
+            } else {
+                fper = pcutdf[pcutdf$type == 'All 1%','cut']
+            }
+            rmatper = all.regmat / fper
+        } else {
+            if (use.strict){
+                fper = pcutdf[pcutdf$type == 'Per 0.1%','cut']
+            } else {
+                fper = pcutdf[pcutdf$type == 'Per 1%','cut']
+            }
+            rmatper = sweep(all.regmat, 2, fper, '/')
+        }
+        all.regmat = 1 * (rmatper > 1) * all.regmat
+        # sum(apply(all.regmat > 1, 1, max))
+        # sum(apply(all.regmat > 1, 2, max))
     }
     save(all.regmat, file=all.regfile)
 } else {
@@ -121,8 +156,8 @@ if (!file.exists(all.regfile)){
 # ------------------------------
 cutoff = 3
 Z = all.regmat > cutoff
-sum(apply(Z, 1, sum) > 0) # 908 with -log10p > 3 (to 2169 after correct?)
-sum(apply(Z, 2, sum) > 0) # 1030 nodes with -log10p > 3 (to 1630 after correct?)
+sum(apply(Z, 1, sum) > 0)
+sum(apply(Z, 2, sum) > 0)
 
 # Gather into long data.frame:
 regwide = data.frame(all.regmat)
@@ -158,12 +193,18 @@ colnames(ltmat) = odf$GROUP
 
 # ---------------------------------------------
 # Reduce gwas uid to one per trait (587 traits)
-# Newest gwas with at least 50k individuals
+# Newest gwas with at least 10k individuals
+# And 10+ snps
 # ---------------------------------------------
-# NIND = 50000
-# NIND = 40000 # 40k includes crohns, etc.
-NIND = 20000 # Remove all the really low GWAS
-keptgw = gwssdf[gwssdf$sampsize > NIND,]
+NIND = 10000 # Remove all the low GWAS
+NSNP = 10
+nsnpdf = aggregate(pValue ~ uid, gwdf, length)
+# NOTE: Some duplicates exist.
+gwssdf2 = aggregate(sampsize ~ uid, gwssdf, max)
+gwssdf = merge(gwssdf, gwssdf2)
+gwssdf = unique(merge(gwssdf, nsnpdf))
+# 803 GWAS: 
+keptgw = gwssdf[gwssdf$sampsize >= NIND & gwssdf$pValue >= NSNP,]
 keptgw = keptgw[order(keptgw$pubDate, decreasing=T),]
 keptgw = keptgw[order(keptgw$sampsize, decreasing=T),]
 traits = unique(keptgw$trait)  # Only unique traits
@@ -173,7 +214,8 @@ keptuids = sapply(traits, function(x){
 print(paste0("Kept ", length(keptuids), " traits (newest with sample > ", NIND, ")"))
 print(paste0("Kept ", length(keptgwas), " GWAS (newest with sample > ", NIND, ")"))
 
-# keptuids = keptuids[keptuids %in% rownames(all.regmat)]
+# NOTE: When loading at some fdr thresh, all below set to 0, 
+# so cutoff value could be 0
 siguid = names(which(apply(all.regmat > cutoff, 1, sum) > 0))
 kuid = siguid[siguid %in% keptuids]
 guid = siguid[siguid %in% keptgwas]
@@ -230,7 +272,7 @@ if (plot.diagnostics){
     ind = mmarg > 0
     s1 = ssize[ind]
     s2 = ssize[!ind]
-    psuff = sub("Rda","png", suffix)
+    psuff = paste0(cutsuff, sub("Rda","png", suffix))
 
     samp.ord = sort(s1)
     samp.ord2 = sort(s2)
@@ -270,5 +312,6 @@ if (plot.diagnostics){
         scale_fill_viridis_d()
     ggsave(paste0('sampsize_binned_enrnodes', psuff), gp, dpi=250, width=9, height=5, units='in')
 
+    # NOTE: There must be an interaction with NSNPs - TODO: plot with snps:
     nsnpdf = aggregate(pValue ~ uid, gwdf, length)
 }

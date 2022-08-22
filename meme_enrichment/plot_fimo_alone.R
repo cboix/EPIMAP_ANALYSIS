@@ -2,6 +2,11 @@
 # -----------------------------------------------------
 # Plot modules from CHMM/other clustering with fimo
 # -----------------------------------------------------
+
+# TODO: NOTE: THE BACKGROUND FOR EPIGENOMES IS NOT APPROPRIATE. 
+# FIXME: DOUBLECOUNTING - ESPECIALLY PROBLEMATIC IN EMBRYONIC REGIONS
+
+
 domain = system("hostname -d", intern=TRUE)
 if (domain == 'broadinstitute.org'){
     bindir='~/data/EPIMAP_ANALYSIS/bin/'
@@ -80,12 +85,16 @@ motdf$dmotif = paste0(motdf$rmotif, " (", motdf$db, ")")
 sigdf = merge(sigdf, motdf)
 
 
+# TODO: Merge motif families
+
+
 # Wide matrix:
 siglong = aggregate(log2fc ~ cls + rmotif, sigdf, max)
 wide = spread(siglong, cls, log2fc, fill=0)
 smat = as.matrix(wide[,-1])
 rownames(smat) = wide$rmotif
 
+# TODO: Q: Keep motifs with at least log2 fc = 2?
 # NOTE: Maybe for the cls, not for epi - not enough signal - diluted.
 smarg = apply(smat, 1,function(x){max(abs(x))})
 # keep.marg = names(which(smarg > 2))
